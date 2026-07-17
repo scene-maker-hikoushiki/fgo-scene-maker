@@ -3,7 +3,7 @@
 Fate/Grand Order 風のシナリオ画面（背景・立ち絵・セリフウインドウ・選択肢など）を組んで、1600×900のPNG画像として書き出せるブラウザツールです。
 インストール不要・アカウント登録不要・外部送信なし。画像やテキストはすべてブラウザ内で処理されます。
 
-🔗 **Web版**: https://bernstein0511-commits.github.io/fgo-scene-maker/
+🔗 **Web版**: https://scene-maker-hikoushiki.github.io/fgo-scene-maker/
 
 ## できること
 
