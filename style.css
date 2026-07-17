@@ -255,9 +255,22 @@ body.is-resizing-console {
   margin-top: 2px;
 }
 
-.console__body {
+/* .console__body（パネル一覧）と.console__terms（利用規約）をまとめて
+   スクロールさせるための外枠。PC幅では実際にここがスクロールコンテナに
+   なり、.console__footer（画像保存等の常時表示欄）はその外に固定される。
+   スマホ幅ではdisplay:contentsで箱ごと消え、中身が.console__footerと
+   直接並ぶ扱いになる（下のメディアクエリ参照）。 */
+.console__scroll {
   flex: 1;
   overflow-y: auto;
+}
+.console__scroll::-webkit-scrollbar { width: 8px; }
+.console__scroll::-webkit-scrollbar-thumb {
+  background: var(--bg-panel-raised);
+  border-radius: 4px;
+}
+
+.console__body {
   padding: 10px 22px 18px;
   container-type: inline-size;
   container-name: console;
@@ -270,12 +283,6 @@ body.is-resizing-console {
 body.is-scenario-playing .console__body {
   pointer-events: none;
   opacity: 0.5;
-}
-
-.console__body::-webkit-scrollbar { width: 8px; }
-.console__body::-webkit-scrollbar-thumb {
-  background: var(--bg-panel-raised);
-  border-radius: 4px;
 }
 
 .console__footer {
@@ -1087,6 +1094,22 @@ input[type="range"] {
   body { overflow: auto; }
   .resizer { display: none; }
   .console { width: 100%; height: auto; border-left: none; border-top: 1px solid var(--line-cyan-dim); }
+
+  /* スマホ幅では.console全体がページと一緒に流れるだけで、.console__scroll
+     自身が独立してスクロールすることはない（heightがautoなので）。そこで
+     箱そのものを消し、中身（パネル一覧＋利用規約）を.console__footerと
+     直接並ぶ扱いにした上で、順序だけ「パネル→保存欄→利用規約」に
+     並べ替える（PC幅では.console__scrollが実際のスクロールコンテナに
+     なるので、ここでは触らない）。 */
+  .console__scroll {
+    display: contents;
+  }
+  .console__footer {
+    order: 1;
+  }
+  .console__terms {
+    order: 2;
+  }
 
   /* コンソールの長い操作パネル/表情差分編集をスクロールしながら触る間も
      プレビューを画面上部に追従させる。stage自身が背景色を持つのは、
