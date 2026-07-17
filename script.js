@@ -20,8 +20,9 @@
   const POS_Y_MIN = -300;
   const POS_Y_MAX = CANVAS_H + 300;
 
-  // 新規キャラクターを追加したときの水平方向の中心位置（幅に対する割合）
-  const SLOT_X_FRAC = [0.5, 0.28, 0.72, 0.14, 0.86];
+  // 「表示中のキャラを等間隔に並べる」ボタン（reflowVisibleCharacterSlotsX）
+  // が使う、キャラクター同士の水平方向の間隔（キャンバス幅に対する割合）。
+  const CHAR_SLOT_PITCH = 0.22;
 
   // 提供されたUI画像/参考スクリーンショットから実測した値
   const BOX_TOP = 664;             // ダイアログボックス内側の上端
@@ -179,9 +180,16 @@
     choice1Color: "#ffffff",
     choice2Color: "#ffffff",
     choice3Color: "#ffffff",
+    scenario: [],            // シナリオの行（スナップショット）の並び
+    scenarioSelectedId: null, // シナリオパネルで現在選択/編集中の行id
+    activeCharId: null,      // 再生中の「発話中キャラ」上書き。null時は通常のz順序ロジック（resolveFrontIndex参照）
   };
 
   let nextCharId = 1;
+  let nextScenarioLineId = 1;
+  // シナリオの再生/録画の実行時状態。プロジェクトファイルには保存しない
+  // （リロードのたびに必ずクリーンな状態から始まるようにするため）
+  let playback = null;
   let nextBgId = 1;
 
   // ---------------- DOM参照 ----------------
@@ -203,6 +211,13 @@
   const charCount = document.getElementById("charCount");
   const charEditor = document.getElementById("charEditor");
   const charItemTemplate = document.getElementById("charItemTemplate");
+  const reflowCharSlotsBtn = document.getElementById("reflowCharSlotsBtn");
+
+  const scenarioList = document.getElementById("scenarioList");
+  const scenarioCount = document.getElementById("scenarioCount");
+  const scenarioEditor = document.getElementById("scenarioEditor");
+  const scenarioAddLineBtn = document.getElementById("scenarioAddLineBtn");
+  const scenarioItemTemplate = document.getElementById("scenarioItemTemplate");
 
   const dimToggle = document.getElementById("dimToggle");
   const sceneColorModeTabs = document.getElementById("sceneColorModeTabs");
@@ -240,8 +255,13 @@
   const projectNameInput = document.getElementById("projectNameInput");
   const footerTabExportBtn = document.getElementById("footerTabExportBtn");
   const footerTabProjectBtn = document.getElementById("footerTabProjectBtn");
+  const footerTabVideoBtn = document.getElementById("footerTabVideoBtn");
   const footerPanelExport = document.getElementById("footerPanelExport");
   const footerPanelProject = document.getElementById("footerPanelProject");
+  const footerPanelVideo = document.getElementById("footerPanelVideo");
+  const videoNameInput = document.getElementById("videoNameInput");
+  const scenarioPlayBtn = document.getElementById("scenarioPlayBtn");
+  const scenarioCancelBtn = document.getElementById("scenarioCancelBtn");
   const stageHint = document.getElementById("stageHint");
 
   // ---------------- コンソール幅リサイズ ----------------
@@ -390,21 +410,21 @@
     const url = URL.createObjectURL(file);
     const img = new Image();
     img.onload = () => {
-      const slot = SLOT_X_FRAC[state.characters.length % SLOT_X_FRAC.length];
       const targetH = CANVAS_H * 0.92;
       const scale = targetH / img.naturalHeight;
       const character = {
         id: nextCharId++,
         img,
         name: file.name.replace(/\.[^.]+$/, ""),
-        x: CANVAS_W * slot,
+        x: CANVAS_W * 0.5, // 中央がデフォルト位置。並べたい場合は「表示中のキャラを等間隔に並べる」ボタンで調整する
         y: CANVAS_H * 0.5,
         scale,
         flipX: false,
         silhouette: false,
         hologram: false,
         grayscale: false,
-        opacity: 100, // 0-100。0は旧「表示」トグルのOFFと同じ挙動
+        visible: true, // シーンへの登場/退場そのものを切り替えるON/OFF。透明度スライダーとは別物
+        opacity: 100, // 0-100。表示中（visible）の間のフェード具合を決める
         edgeFadeAmount: 0, // 0-100。有効な各辺からどこまでフェードが届くか
         edgeFadeTop: false,
         edgeFadeBottom: false,
@@ -462,18 +482,61 @@
     img.src = url;
   }
 
+  // 「表示中のキャラを等間隔に並べる」ボタンの実体。自動では発動せず、
+  // 明示的にボタンを押したときだけ、現在“表示”がONになっているキャラ
+  // （非表示中のキャラは対象外）だけを対象に、各キャラの中心点Xを画面
+  // 中央を軸に左右対称・等間隔に並べ直す。2人なら中央から左右対称に、
+  // 3人なら真ん中の1人を挟んで等間隔に、というイメージ。Y座標や個別の
+  // 調整（表情/差分/エフェクト等）、非表示中のキャラの位置には触れない。
+  function reflowVisibleCharacterSlotsX() {
+    const visibleChars = state.characters.filter((c) => c.visible !== false);
+    const n = visibleChars.length;
+    if (n === 0) return;
+    const pitch = n > 1 ? Math.min(CHAR_SLOT_PITCH, 0.8 / (n - 1)) : 0;
+    visibleChars.forEach((c, i) => {
+      const offset = (i - (n - 1) / 2) * pitch;
+      c.x = CANVAS_W * (0.5 + offset);
+    });
+    renderCharEditor();
+    renderAll();
+  }
+
   function getCharacter(id) {
     return state.characters.find((c) => c.id === id);
+  }
+
+  // 「表示状態」ボタン（削除ボタンの隣）と透明度スライダーは別物——前者は
+  // シーンへの登場/退場そのものを切り替えるON/OFF、後者はそのキャラが
+  // 表示されている間のフェード具合を決める数値。どちらか一方でも満たさ
+  // なければ、そのキャラは描画・当たり判定・暗転判定のいずれからも
+  // 除外される。c.visibleが未定義（古い保存データ等）の場合は表示中扱い。
+  function isCharacterVisible(c) {
+    return c.visible !== false && c.opacity > 0;
+  }
+
+  // 「誰が最前面（＝発話中）か」の判定を1箇所にまとめたもの。通常はz順序で
+  // 一番手前の表示中キャラだが、シナリオ再生中はstate.activeCharIdで
+  // 明示的に上書きできる（該当キャラが削除済み/非表示なら通常のz順序に
+  // フォールバックする）。drawSceneの暗転処理・renderCharListのアクティブ
+  // 表示・getFrontmostCharacterの3箇所全てがこれを呼ぶことで、シナリオ
+  // 再生中も常に一致した結果になる。
+  function resolveFrontIndex() {
+    if (state.activeCharId != null) {
+      const idx = state.characters.findIndex((c) => c.id === state.activeCharId && isCharacterVisible(c));
+      if (idx !== -1) return idx;
+    }
+    for (let i = state.characters.length - 1; i >= 0; i--) {
+      if (isCharacterVisible(state.characters[i])) return i;
+    }
+    return -1;
   }
 
   // 最前面の「表示中」キャラクター — 非アクティブな話者を暗くするのと
   // 同じ考え方なので、「誰が手前にいるか」と「誰が話しているか」が
   // 常に一致するようになっている
   function getFrontmostCharacter() {
-    for (let i = state.characters.length - 1; i >= 0; i--) {
-      if (state.characters[i].opacity > 0) return state.characters[i];
-    }
-    return null;
+    const idx = resolveFrontIndex();
+    return idx === -1 ? null : state.characters[idx];
   }
 
   // 連動がONのとき、state.speakerを最前面キャラクターの名前に追従させ続ける
@@ -552,6 +615,119 @@
     renderAll();
   }
 
+  // ---------------- シナリオの行（スナップショット） ----------------
+  // 現在のライブ状態（話者・台詞・発話中キャラ・各キャラの表情/差分/表示
+  // 状態）から、新しい行オブジェクトを作る。既存の行を上書きするときも
+  // （updateScenarioLineFromLiveStateから）同じロジックを使い回す。
+  function buildScenarioLineFromLiveState(id, advanceMode, autoDelaySec) {
+    const chars = state.characters.map((c) => {
+      syncActiveVariant(c); // その場の編集内容をアクティブな差分スロットへ反映してからスナップショットする
+      return {
+        charId: c.id,
+        activeExpr: c.activeExpr,
+        activeVariantIndex: c.activeVariantIndex,
+        visible: c.visible !== false,
+        opacity: c.opacity,
+      };
+    });
+    const front = getFrontmostCharacter();
+    return {
+      id,
+      speaker: state.speaker,
+      body: state.body,
+      activeCharId: front ? front.id : null,
+      advanceMode,
+      autoDelaySec,
+      chars,
+      showChoices: state.showChoices,
+      choiceCount: state.choiceCount,
+      choice1: state.choice1,
+      choice2: state.choice2,
+      choice3: state.choice3,
+      choice1Color: state.choice1Color,
+      choice2Color: state.choice2Color,
+      choice3Color: state.choice3Color,
+    };
+  }
+
+  function captureScenarioLine() {
+    const line = buildScenarioLineFromLiveState(nextScenarioLineId++, "auto", 3);
+    state.scenario.push(line);
+    state.scenarioSelectedId = line.id;
+    renderScenarioList();
+    renderScenarioEditor();
+  }
+
+  function updateScenarioLineFromLiveState(line) {
+    const fresh = buildScenarioLineFromLiveState(line.id, line.advanceMode, line.autoDelaySec);
+    Object.assign(line, fresh);
+    renderScenarioList();
+    renderScenarioEditor();
+  }
+
+  // 保存済みの行を現在のライブ状態へ反映する（シナリオパネルで行をクリック
+  // したとき、および再生中に各行へ進むときの両方から呼ばれる）。
+  function applyScenarioLine(line) {
+    state.activeCharId = line.activeCharId;
+    line.chars.forEach((snap) => {
+      const c = getCharacter(snap.charId);
+      if (!c) return; // 削除済みキャラへの参照は黙って無視する
+      if (snap.activeVariantIndex !== c.activeVariantIndex) {
+        switchCharacterVariant(c, snap.activeVariantIndex);
+      }
+      // switchCharacterVariantは直前にその差分がアクティブだった時の表情を
+      // 復元してしまうため、行が指定する表情で必ず上書きする
+      c.activeExpr = snap.activeExpr;
+      c.variants[c.activeVariantIndex].activeExpr = snap.activeExpr;
+      c.visible = snap.visible !== false;
+      c.opacity = snap.opacity;
+    });
+    if (state.speakerLinkToChar) {
+      syncSpeakerFromFrontChar(); // resolveFrontIndex経由で今設定したactiveCharIdを尊重する
+    } else {
+      state.speaker = line.speaker;
+      speakerInput.value = state.speaker;
+    }
+    state.body = line.body;
+    bodyInput.value = state.body;
+
+    state.showChoices = line.showChoices;
+    choicesToggle.checked = state.showChoices;
+    applyChoiceCount(line.choiceCount);
+    state.choice1 = line.choice1;
+    state.choice2 = line.choice2;
+    state.choice3 = line.choice3;
+    choice1Input.value = state.choice1;
+    choice2Input.value = state.choice2;
+    choice3Input.value = state.choice3;
+    state.choice1Color = line.choice1Color;
+    state.choice2Color = line.choice2Color;
+    state.choice3Color = line.choice3Color;
+    choice1ColorInput.value = state.choice1Color;
+    choice2ColorInput.value = state.choice2Color;
+    choice3ColorInput.value = state.choice3Color;
+
+    renderCharList();
+    renderCharEditor();
+    renderAll();
+  }
+
+  function moveScenarioLine(id, dir) {
+    const i = state.scenario.findIndex((l) => l.id === id);
+    const j = i + dir;
+    if (i === -1 || j < 0 || j >= state.scenario.length) return;
+    [state.scenario[i], state.scenario[j]] = [state.scenario[j], state.scenario[i]];
+    renderScenarioList();
+    renderScenarioEditor();
+  }
+
+  function removeScenarioLine(id) {
+    state.scenario = state.scenario.filter((l) => l.id !== id);
+    if (state.scenarioSelectedId === id) state.scenarioSelectedId = null;
+    renderScenarioList();
+    renderScenarioEditor();
+  }
+
   function addVariantFromFile(c, file) {
     const url = URL.createObjectURL(file);
     const img = new Image();
@@ -624,6 +800,45 @@
         rows,
         cols,
         count: 10,
+      },
+    };
+  }
+
+  // プロジェクトファイル（外部から読み込む任意のJSON）由来のexprSheetを
+  // 安全な形に丸め込む。本体/顔/グリッドの各座標値はrenderCharEditor()の
+  // テンプレートでvalue="${...}"のようにエスケープなしでinnerHTMLへ差し込む
+  // ため、数値以外の値（文字列など）が紛れ込むとHTMLインジェクションに
+  // つながる。信頼できない入力が入ってくる境界（プロジェクト読み込み時）で
+  // 必ず有限の数値へ丸めることで、以降は数値であることを前提にできる。
+  function sanitizeExprSheet(raw, naturalW, naturalH) {
+    const def = makeDefaultExprSheet(naturalW, naturalH);
+    const num = (v, fallback) => (typeof v === "number" && Number.isFinite(v) ? v : fallback);
+    const src = raw && typeof raw === "object" ? raw : {};
+    const body = src.body && typeof src.body === "object" ? src.body : {};
+    const face = src.face && typeof src.face === "object" ? src.face : {};
+    const grid = src.grid && typeof src.grid === "object" ? src.grid : {};
+    return {
+      enabled: !!src.enabled,
+      body: {
+        x: num(body.x, def.body.x),
+        y: num(body.y, def.body.y),
+        w: num(body.w, def.body.w),
+        h: num(body.h, def.body.h),
+      },
+      face: {
+        x: num(face.x, def.face.x),
+        y: num(face.y, def.face.y),
+        w: num(face.w, def.face.w),
+        h: num(face.h, def.face.h),
+      },
+      grid: {
+        x: num(grid.x, def.grid.x),
+        y: num(grid.y, def.grid.y),
+        cellW: num(grid.cellW, def.grid.cellW),
+        cellH: num(grid.cellH, def.grid.cellH),
+        rows: num(grid.rows, def.grid.rows),
+        cols: num(grid.cols, def.grid.cols),
+        count: num(grid.count, def.grid.count),
       },
     };
   }
@@ -1223,16 +1438,10 @@
     // キャラクター、奥から手前へ
     // 暗くする処理の「アクティブ」判定は、表示されている中で最前面の
     // キャラクターが対象——配列末尾が完全透明なキャラクターだからといって
-    // 他の全員が暗くなったままになってはいけない
-    let frontIndex = -1;
-    for (let i = state.characters.length - 1; i >= 0; i--) {
-      if (state.characters[i].opacity > 0) {
-        frontIndex = i;
-        break;
-      }
-    }
+    // 他の全員が暗くなったままになってはいけない（resolveFrontIndex参照）
+    let frontIndex = resolveFrontIndex();
     state.characters.forEach((c, i) => {
-      if (c.opacity <= 0) return;
+      if (!isCharacterVisible(c)) return;
       const { w, h } = charBBox(c);
       const dim = state.dimInactive && state.characters.length > 1 && i !== frontIndex;
 
@@ -1373,6 +1582,24 @@
       // NEXTは常に完全不透明のまま — LOG/AUTOと違い、アクティブ/クリック可能に見せる意図
       if (state.showNext) context.drawImage(assets.next, NEXT_X, ICON_NEXT_Y, NEXT_SIZE, NEXT_SIZE);
     }
+
+    drawWatermark(context);
+  }
+
+  // 非公式のファンメイドツールであることを示す透かし。UI要素のON/OFF設定に
+  // 関わらず常に描画し、drawScene経由のプレビュー・PNG書き出し・動画録画の
+  // どれにも必ず焼き込まれるようにする（切り替えスイッチは設けない）。
+  // 名前欄（左側）とは反対の右側、LOGアイコンの少し上に配置している。
+  function drawWatermark(context) {
+    context.save();
+    context.font = "40px " + bodyFontStack();
+    context.textAlign = "right";
+    context.textBaseline = "bottom";
+    context.shadowColor = "rgba(0, 0, 0, 0.6)";
+    context.shadowBlur = 4;
+    context.fillStyle = "rgba(255, 255, 255, 0.5)";
+    context.fillText("非公式ファンメイドツール", CANVAS_W - 40, ICON_LOG_Y - 20);
+    context.restore();
   }
 
   function bodyFontStack() {
@@ -1528,8 +1755,31 @@
     return pos.x >= left && pos.x <= left + w && pos.y >= top && pos.y <= top + h;
   }
 
+  // NEXTアイコンの当たり判定（キャンバス座標系）。シナリオ再生中、手動
+  // 進行の行でのみこれをクリックすると次の行へ進む。
+  function hitNextIcon(pos) {
+    return pos.x >= NEXT_X && pos.x <= NEXT_X + NEXT_SIZE && pos.y >= ICON_NEXT_Y && pos.y <= ICON_NEXT_Y + NEXT_SIZE;
+  }
+
   canvas.addEventListener("pointerdown", (evt) => {
     const pos = getCanvasPos(evt);
+
+    // 再生中の手動進行の行に限り、NEXTクリックを他の判定より優先する
+    if (
+      playback &&
+      playback.currentLine &&
+      playback.currentLine.advanceMode === "manual" &&
+      state.showButtons &&
+      state.showNext &&
+      hitNextIcon(pos)
+    ) {
+      advanceScenarioPlayback();
+      return;
+    }
+    // 再生中はNEXT以外のキャンバス操作を無効化する——行のスナップショットは
+    // 位置/拡縮を保持しないため、再生中にドラッグ/リサイズされると以降の
+    // 行がずっと誤った位置のまま録画され続けてしまう
+    if (playback) return;
 
     if (state.selectedId != null) {
       const selected = getCharacter(state.selectedId);
@@ -1554,7 +1804,7 @@
     let hit = null;
     for (let i = state.characters.length - 1; i >= 0; i--) {
       const cc = state.characters[i];
-      if (cc.opacity > 0 && hitCharacter(cc, pos)) {
+      if (isCharacterVisible(cc) && hitCharacter(cc, pos)) {
         hit = cc;
         break;
       }
@@ -1733,13 +1983,7 @@
 
   function renderCharList() {
     charList.innerHTML = "";
-    let frontIndex = -1;
-    for (let i = state.characters.length - 1; i >= 0; i--) {
-      if (state.characters[i].opacity > 0) {
-        frontIndex = i;
-        break;
-      }
-    }
+    const frontIndex = resolveFrontIndex();
     state.characters.forEach((c, i) => {
       const node = charItemTemplate.content.firstElementChild.cloneNode(true);
       node.dataset.id = String(c.id);
@@ -1747,11 +1991,23 @@
       node.querySelector(".charlist__name").textContent = c.name || "キャラクター";
       if (c.id === state.selectedId) node.classList.add("is-selected");
       if (i === frontIndex) node.classList.add("is-active");
-      if (c.opacity <= 0) node.classList.add("is-hidden");
+      if (!isCharacterVisible(c)) node.classList.add("is-hidden");
       node.addEventListener("click", () => {
         state.selectedId = c.id;
         renderCharList();
         renderCharEditor();
+        renderAll();
+      });
+      const visBtn = node.querySelector(".charlist__visibility-btn");
+      const isVisible = c.visible !== false;
+      visBtn.textContent = isVisible ? "👁" : "🚫";
+      visBtn.title = isVisible ? "非表示にする" : "表示する";
+      visBtn.classList.toggle("is-off", !isVisible);
+      visBtn.addEventListener("click", (e) => {
+        e.stopPropagation();
+        c.visible = !isVisible;
+        renderCharList();
+        syncSpeakerFromFrontChar();
         renderAll();
       });
       node.querySelector(".charlist__del").addEventListener("click", (e) => {
@@ -1783,6 +2039,7 @@
       node.querySelector("img").src = v.img.src;
       node.querySelector(".charlist__name").textContent = v.name || "差分";
       node.querySelector(".charlist__active-dot").title = "表示中の差分";
+      node.querySelector(".charlist__visibility-btn").remove(); // 表示/非表示はキャラクター単位の概念であり差分ごとには無い
       if (idx === c.activeVariantIndex) {
         node.classList.add("is-selected");
         node.classList.add("is-active");
@@ -1823,6 +2080,24 @@
     const isBack = i === 0;
 
     charEditor.innerHTML = `
+      <span class="char-editor__label" style="margin-top:0;">位置（ドラッグで移動。中心・端に近づくと吸着します）</span>
+      <div class="char-editor__row" style="align-items: center;">
+        <span class="field__label" style="margin:0; width:12px;">X</span>
+        <input type="range" id="posXRange" min="${POS_X_MIN}" max="${POS_X_MAX}" value="${Math.round(c.x)}" style="flex: 1;">
+        <input type="number" id="posXInput" value="${Math.round(c.x)}" step="1" class="field__input field__input--number field__input--number-small">
+      </div>
+      <div class="char-editor__row" style="align-items: center;">
+        <span class="field__label" style="margin:0; width:12px;">Y</span>
+        <input type="range" id="posYRange" min="${POS_Y_MIN}" max="${POS_Y_MAX}" value="${Math.round(c.y)}" style="flex: 1;">
+        <input type="number" id="posYInput" value="${Math.round(c.y)}" step="1" class="field__input field__input--number field__input--number-small">
+      </div>
+
+      <span class="char-editor__label">拡大縮小（ドラッグでも調整可）</span>
+      <div class="char-editor__row" style="align-items: center;">
+        <input type="range" id="scaleRange" min="3" max="400" value="${scalePct}" style="flex: 1;">
+        <input type="number" id="scaleNumInput" min="3" max="400" value="${scalePct}" class="field__input field__input--number field__input--number-small">
+      </div>
+
       <div class="char-editor__row char-editor__row--toggles">
         <div class="mini-toggle">
           <span class="char-editor__label">反転</span>
@@ -1922,24 +2197,6 @@
         ` : ""}
       </div>
 
-      <span class="char-editor__label">位置（ドラッグで移動。中心・端に近づくと吸着します）</span>
-      <div class="char-editor__row" style="align-items: center;">
-        <span class="field__label" style="margin:0; width:12px;">X</span>
-        <input type="range" id="posXRange" min="${POS_X_MIN}" max="${POS_X_MAX}" value="${Math.round(c.x)}" style="flex: 1;">
-        <input type="number" id="posXInput" value="${Math.round(c.x)}" step="1" class="field__input field__input--number field__input--number-small">
-      </div>
-      <div class="char-editor__row" style="align-items: center;">
-        <span class="field__label" style="margin:0; width:12px;">Y</span>
-        <input type="range" id="posYRange" min="${POS_Y_MIN}" max="${POS_Y_MAX}" value="${Math.round(c.y)}" style="flex: 1;">
-        <input type="number" id="posYInput" value="${Math.round(c.y)}" step="1" class="field__input field__input--number field__input--number-small">
-      </div>
-
-      <span class="char-editor__label">拡大縮小（ドラッグでも調整可）</span>
-      <div class="char-editor__row" style="align-items: center;">
-        <input type="range" id="scaleRange" min="3" max="400" value="${scalePct}" style="flex: 1;">
-        <input type="number" id="scaleNumInput" min="3" max="400" value="${scalePct}" class="field__input field__input--number field__input--number-small">
-      </div>
-
       <span class="char-editor__label">重なり順</span>
       <div class="char-editor__row">
         <button type="button" class="btn btn--sm" id="layerBackBtn" ${isBack ? "disabled" : ""}>ひとつ背面へ</button>
@@ -1978,6 +2235,8 @@
       </div>
 
       ${c.exprSheet.enabled ? `
+        <details class="collapsible-sub" id="exprDetailsToggle" ${c._exprDetailsOpen === false ? "" : "open"}>
+        <summary>詳細設定（本体・顔位置・グリッド）</summary>
         <div class="expr-editor">
           <div class="expr-editor__preview-col">
             <p class="char-editor__hint">元画像サイズ: ${c.naturalW} × ${c.naturalH}px</p>
@@ -2027,6 +2286,7 @@
             </div>
           </div>
         </div>
+        </details>
 
         <span class="char-editor__label">表情を選択</span>
         <div class="expr-editor__thumbs" id="exprThumbs"><!-- JS populates --></div>
@@ -2268,6 +2528,14 @@
     });
 
     if (c.exprSheet.enabled) {
+      // renderCharEditorは毎回テンプレートを丸ごと作り直すため、開閉状態を
+      // 覚えておかないと再描画のたびに開いた状態にリセットされてしまう
+      const exprDetails = charEditor.querySelector("#exprDetailsToggle");
+      if (exprDetails) {
+        exprDetails.addEventListener("toggle", () => {
+          c._exprDetailsOpen = exprDetails.open;
+        });
+      }
       const bindRect = (prefix, rect) => {
         [
           ["X", "x"],
@@ -2665,6 +2933,149 @@
     }
   }
 
+  // ---------------- シナリオの行リスト / エディタUI ----------------
+  // 行のspeaker/bodyはプロジェクトファイル経由で外部から読み込まれる
+  // 自由入力文字列なので、必ず.textContentで書き込む（innerHTMLへの
+  // 文字列埋め込みは絶対に行わない——HTMLインジェクションの原因になる）。
+  // ドラッグ中の行のid。掴んでいる間はrenderScenarioList()を呼ばず
+  // （呼ぶとハンドル要素ごと作り直されポインタキャプチャが切れてしまう）
+  // 実際のDOM要素を直接並べ替えるだけにとどめ、指を離した時点で初めて
+  // state.scenarioへ反映して1回だけ再描画する。
+  let scenarioDragId = null;
+
+  function wireScenarioDragHandle(node, line) {
+    const handle = node.querySelector(".charlist__drag-handle");
+    handle.addEventListener("pointerdown", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation(); // 行の読み込み（liクリック）を誘発しない
+      scenarioDragId = line.id;
+      node.classList.add("is-dragging");
+      handle.setPointerCapture(evt.pointerId);
+    });
+    handle.addEventListener("pointermove", (evt) => {
+      if (scenarioDragId !== line.id) return;
+      const items = Array.from(scenarioList.children);
+      for (const item of items) {
+        if (item === node) continue;
+        const rect = item.getBoundingClientRect();
+        const mid = rect.top + rect.height / 2;
+        if (evt.clientY < mid) {
+          scenarioList.insertBefore(node, item);
+          return;
+        }
+      }
+      scenarioList.appendChild(node); // どの項目より下 — 末尾へ
+    });
+    const endDrag = (evt) => {
+      if (scenarioDragId !== line.id) return;
+      scenarioDragId = null;
+      try {
+        handle.releasePointerCapture(evt.pointerId);
+      } catch (e) {
+        /* 何もしない */
+      }
+      // 実際に並び替わったDOM順序を読み取ってstate.scenarioへ反映する
+      const orderedIds = Array.from(scenarioList.children).map((el) => Number(el.dataset.id));
+      state.scenario.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
+      renderScenarioList();
+      renderScenarioEditor();
+    };
+    handle.addEventListener("pointerup", endDrag);
+    handle.addEventListener("pointercancel", endDrag);
+  }
+
+  function renderScenarioList() {
+    scenarioList.innerHTML = "";
+    state.scenario.forEach((line, i) => {
+      const node = scenarioItemTemplate.content.firstElementChild.cloneNode(true);
+      node.dataset.id = String(line.id);
+      // 選択肢を表示している行は、話者/本文の代わりに「選択肢」であること
+      // と選択肢1の内容をプレビューに出す（本文より選択肢が前面に出る
+      // ため、一覧上もそちらを優先して表示する）
+      node.querySelector(".charlist__scenario-speaker").textContent =
+        (i + 1) + ". " + (line.showChoices ? "選択肢" : line.speaker || "（話者なし）");
+      node.querySelector(".charlist__scenario-body").textContent = line.showChoices
+        ? line.choice1 || "（選択肢1未入力）"
+        : line.body || "（本文なし）";
+      node.querySelector(".charlist__scenario-mode").textContent =
+        line.advanceMode === "manual" ? "手動" : "自動 " + line.autoDelaySec + "s";
+      if (line.id === state.scenarioSelectedId) node.classList.add("is-selected");
+      node.addEventListener("click", () => {
+        state.scenarioSelectedId = line.id;
+        applyScenarioLine(line);
+        renderScenarioList();
+        renderScenarioEditor();
+      });
+      node.querySelector(".charlist__del").addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeScenarioLine(line.id);
+      });
+      wireScenarioDragHandle(node, line);
+      scenarioList.appendChild(node);
+    });
+    scenarioCount.textContent = String(state.scenario.length);
+  }
+
+  function renderScenarioEditor() {
+    const line = state.scenario.find((l) => l.id === state.scenarioSelectedId);
+    if (!line) {
+      scenarioEditor.className = "char-editor char-editor--empty";
+      scenarioEditor.innerHTML = '<p class="char-editor__empty-msg">行を選択すると、ここで進行方法を調整できます</p>';
+      return;
+    }
+    scenarioEditor.className = "char-editor";
+    const i = state.scenario.findIndex((l) => l.id === line.id);
+    const isFirst = i === 0;
+    const isLast = i === state.scenario.length - 1;
+
+    scenarioEditor.innerHTML = `
+      <span class="char-editor__label">進行方式</span>
+      <div class="footer-tabs" id="scenarioAdvanceModeTabs">
+        <button type="button" class="footer-tab ${line.advanceMode === "auto" ? "is-active" : ""}" data-mode="auto">自動</button>
+        <button type="button" class="footer-tab ${line.advanceMode === "manual" ? "is-active" : ""}" data-mode="manual">手動</button>
+      </div>
+      ${line.advanceMode === "auto" ? `
+        <label class="field">
+          <span class="field__label">秒数</span>
+          <input type="number" class="field__input field__input--number-small" id="scenarioDelayInput" value="${Math.round(line.autoDelaySec * 10) / 10}" min="0.1" step="0.1">
+        </label>
+      ` : ""}
+
+      <span class="char-editor__label" style="margin-top:16px;">並び替え</span>
+      <div class="char-editor__row">
+        <button type="button" class="btn btn--sm" id="scenarioMoveUpBtn" ${isFirst ? "disabled" : ""}>ひとつ上へ</button>
+        <button type="button" class="btn btn--sm" id="scenarioMoveDownBtn" ${isLast ? "disabled" : ""}>ひとつ下へ</button>
+      </div>
+
+      <div class="char-editor__row" style="margin-top:16px;">
+        <button type="button" class="btn btn--primary" id="scenarioUpdateBtn">この内容で更新</button>
+      </div>
+      <div class="char-editor__row">
+        <button type="button" class="btn btn--danger btn--sm" id="scenarioDeleteLineBtn">この行を削除</button>
+      </div>
+    `;
+
+    scenarioEditor.querySelectorAll("#scenarioAdvanceModeTabs .footer-tab").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        line.advanceMode = btn.dataset.mode;
+        renderScenarioEditor();
+        renderScenarioList();
+      });
+    });
+    const delayInput = scenarioEditor.querySelector("#scenarioDelayInput");
+    if (delayInput) {
+      delayInput.addEventListener("input", (e) => {
+        const v = Number(e.target.value);
+        line.autoDelaySec = v > 0 ? v : 0.1;
+        renderScenarioList();
+      });
+    }
+    scenarioEditor.querySelector("#scenarioMoveUpBtn").addEventListener("click", () => moveScenarioLine(line.id, -1));
+    scenarioEditor.querySelector("#scenarioMoveDownBtn").addEventListener("click", () => moveScenarioLine(line.id, 1));
+    scenarioEditor.querySelector("#scenarioUpdateBtn").addEventListener("click", () => updateScenarioLineFromLiveState(line));
+    scenarioEditor.querySelector("#scenarioDeleteLineBtn").addEventListener("click", () => removeScenarioLine(line.id));
+  }
+
   // ---------------- 背景リスト / エディタUI ----------------
   function renderBgList() {
     bgList.innerHTML = "";
@@ -2759,6 +3170,10 @@
     const file = e.target.files[0];
     if (file) addCharacterFromFile(file);
     e.target.value = "";
+  });
+
+  reflowCharSlotsBtn.addEventListener("click", () => {
+    reflowVisibleCharacterSlotsX();
   });
 
   // スマホ幅（@media max-width:860pxでプレビューが画面上部に追従表示になる）
@@ -2903,10 +3318,11 @@
     renderAll();
   });
 
-  // ---------------- フッタータブ（画像として保存 / プロジェクト） ----------------
+  // ---------------- フッタータブ（画像として保存 / プロジェクト / 動画保存） ----------------
   const footerTabs = [
     { btn: footerTabExportBtn, panel: footerPanelExport },
     { btn: footerTabProjectBtn, panel: footerPanelProject },
+    { btn: footerTabVideoBtn, panel: footerPanelVideo },
   ];
   footerTabs.forEach(({ btn, panel }) => {
     btn.addEventListener("click", () => {
@@ -2918,6 +3334,16 @@
     });
   });
 
+  // Windows/macOSのファイル名に使えない文字を除去し、貼り付けた名前が
+  // 誤ってダウンロードを壊さないようにする（PNG/プロジェクト/動画の
+  // 3つの書き出しで共通して使う）
+  function sanitizeFilenameInput(raw) {
+    return raw.trim().replace(/[\\/:*?"<>|]/g, "");
+  }
+  function timestampSuffix() {
+    return new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+  }
+
   exportBtn.addEventListener("click", () => {
     const off = document.createElement("canvas");
     off.width = CANVAS_W;
@@ -2927,10 +3353,8 @@
     try {
       const url = off.toDataURL("image/png");
       const a = document.createElement("a");
-      // Windows/macOSのファイル名に使えない文字を除去し、貼り付けた
-      // 名前が誤ってダウンロードを壊さないようにする
-      const customName = exportNameInput.value.trim().replace(/[\\/:*?"<>|]/g, "");
-      const stamp = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+      const customName = sanitizeFilenameInput(exportNameInput.value);
+      const stamp = timestampSuffix();
       a.href = url;
       a.download = (customName || "scenario_" + stamp) + ".png";
       document.body.appendChild(a);
@@ -3013,6 +3437,7 @@
           silhouette: c.silhouette,
           hologram: c.hologram,
           grayscale: c.grayscale,
+          visible: c.visible !== false,
           opacity: c.opacity,
           edgeFadeAmount: c.edgeFadeAmount,
           edgeFadeTop: c.edgeFadeTop,
@@ -3046,6 +3471,29 @@
           })),
         };
       }),
+      scenario: state.scenario.map((line) => ({
+        id: line.id,
+        speaker: line.speaker,
+        body: line.body,
+        activeCharId: line.activeCharId,
+        advanceMode: line.advanceMode,
+        autoDelaySec: line.autoDelaySec,
+        chars: line.chars.map((s) => ({
+          charId: s.charId,
+          activeExpr: s.activeExpr,
+          activeVariantIndex: s.activeVariantIndex,
+          visible: s.visible,
+          opacity: s.opacity,
+        })),
+        showChoices: line.showChoices,
+        choiceCount: line.choiceCount,
+        choice1: line.choice1,
+        choice2: line.choice2,
+        choice3: line.choice3,
+        choice1Color: line.choice1Color,
+        choice2Color: line.choice2Color,
+        choice3Color: line.choice3Color,
+      })),
     };
   }
 
@@ -3090,7 +3538,7 @@
                 name: v.name || "差分",
                 naturalW: v.naturalW || vImg.naturalWidth,
                 naturalH: v.naturalH || vImg.naturalHeight,
-                exprSheet: v.exprSheet || makeDefaultExprSheet(vImg.naturalWidth, vImg.naturalHeight),
+                exprSheet: sanitizeExprSheet(v.exprSheet, vImg.naturalWidth, vImg.naturalHeight),
                 activeExpr: typeof v.activeExpr === "number" ? v.activeExpr : -1,
                 offsetX: typeof v.offsetX === "number" ? v.offsetX : 0,
                 offsetY: typeof v.offsetY === "number" ? v.offsetY : 0,
@@ -3108,7 +3556,7 @@
               name: "オリジナル",
               naturalW: c.naturalW || img.naturalWidth,
               naturalH: c.naturalH || img.naturalHeight,
-              exprSheet: c.exprSheet || makeDefaultExprSheet(img.naturalWidth, img.naturalHeight),
+              exprSheet: sanitizeExprSheet(c.exprSheet, img.naturalWidth, img.naturalHeight),
               activeExpr: typeof c.activeExpr === "number" ? c.activeExpr : -1,
               offsetX: 0,
               offsetY: 0,
@@ -3131,6 +3579,8 @@
           silhouette: !!c.silhouette,
           hologram: !!c.hologram,
           grayscale: !!c.grayscale,
+          // 表示ON/OFFボタンより前に保存されたデータには存在しないので、その場合は表示中扱い
+          visible: typeof c.visible === "boolean" ? c.visible : true,
           // 古い保存データでは0-100の透明度スライダーではなくhiddenの真偽値を使っていた
           opacity: typeof c.opacity === "number" ? c.opacity : c.hidden ? 0 : 100,
           edgeFadeAmount: typeof c.edgeFadeAmount === "number" ? c.edgeFadeAmount : 0,
@@ -3159,6 +3609,46 @@
 
     state.backgrounds = loadedBackgrounds;
     state.characters = loadedCharacters;
+
+    // シナリオの行に含まれるキャラ参照は、読み込んだキャラクター一覧に
+    // 実在するidだけを信用する（削除済み/存在しないidへの参照は落とす）。
+    // speaker/bodyは自由入力文字列だが、描画側（renderScenarioList）が
+    // 必ず.textContentで書き込むため、ここでは型の防御的コアーションのみ
+    // 行えばよい（innerHTMLへの直接埋め込みはしない前提）。
+    const validCharIds = new Set(loadedCharacters.map((c) => c.id));
+    const rawScenario = Array.isArray(data.scenario) ? data.scenario : [];
+    state.scenario = rawScenario.map((line) => ({
+      id: typeof line.id === "number" ? line.id : nextScenarioLineId++,
+      speaker: typeof line.speaker === "string" ? line.speaker : "",
+      body: typeof line.body === "string" ? line.body : "",
+      activeCharId: validCharIds.has(line.activeCharId) ? line.activeCharId : null,
+      advanceMode: line.advanceMode === "manual" ? "manual" : "auto",
+      autoDelaySec: typeof line.autoDelaySec === "number" && line.autoDelaySec > 0 ? line.autoDelaySec : 3,
+      chars: Array.isArray(line.chars)
+        ? line.chars
+            .filter((s) => s && validCharIds.has(s.charId))
+            .map((s) => ({
+              charId: s.charId,
+              activeExpr: typeof s.activeExpr === "number" ? s.activeExpr : -1,
+              activeVariantIndex: typeof s.activeVariantIndex === "number" ? s.activeVariantIndex : 0,
+              visible: typeof s.visible === "boolean" ? s.visible : true,
+              opacity: typeof s.opacity === "number" ? s.opacity : 100,
+            }))
+        : [],
+      // 選択肢対応より前に保存された行にはこれらのフィールドが無いので、
+      // その場合は「選択肢なし」として扱う
+      showChoices: !!line.showChoices,
+      choiceCount: [1, 2, 3].includes(line.choiceCount) ? line.choiceCount : 2,
+      choice1: typeof line.choice1 === "string" ? line.choice1 : "",
+      choice2: typeof line.choice2 === "string" ? line.choice2 : "",
+      choice3: typeof line.choice3 === "string" ? line.choice3 : "",
+      choice1Color: typeof line.choice1Color === "string" ? line.choice1Color : "#ffffff",
+      choice2Color: typeof line.choice2Color === "string" ? line.choice2Color : "#ffffff",
+      choice3Color: typeof line.choice3Color === "string" ? line.choice3Color : "#ffffff",
+    }));
+    state.activeCharId = null; // 再生専用の上書き値なので、読み込み直後は必ずクリアする
+    state.scenarioSelectedId = null;
+    nextScenarioLineId = 1 + state.scenario.reduce((m, l) => Math.max(m, l.id), 0);
 
     const s = data.state || {};
     state.dimInactive = s.dimInactive ?? true;
@@ -3231,6 +3721,8 @@
     renderBgEditor();
     renderCharList();
     renderCharEditor();
+    renderScenarioList();
+    renderScenarioEditor();
     renderAll();
   }
 
@@ -3240,10 +3732,8 @@
       const blob = new Blob([json], { type: "application/json" });
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
-      // Windows/macOSのファイル名に使えない文字を除去し、貼り付けた
-      // 名前が誤ってダウンロードを壊さないようにする
-      const customName = projectNameInput.value.trim().replace(/[\\/:*?"<>|]/g, "");
-      const stamp = new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
+      const customName = sanitizeFilenameInput(projectNameInput.value);
+      const stamp = timestampSuffix();
       a.href = url;
       a.download = (customName || "project_" + stamp) + ".fgoscene.json";
       document.body.appendChild(a);
@@ -3274,6 +3764,151 @@
     }
   });
 
+  scenarioAddLineBtn.addEventListener("click", () => {
+    captureScenarioLine();
+  });
+
+  // ---------------- シナリオ再生・録画 ----------------
+  const VIDEO_MIME_CANDIDATES = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
+
+  function advanceScenarioPlayback() {
+    if (!playback) return;
+    if (playback.timerId) {
+      clearTimeout(playback.timerId);
+      playback.timerId = null;
+    }
+    const nextIndex = playback.index + 1;
+    if (nextIndex >= state.scenario.length) {
+      stopScenarioPlayback();
+      return;
+    }
+    goToScenarioLine(nextIndex);
+  }
+
+  function goToScenarioLine(index) {
+    const line = state.scenario[index];
+    playback.index = index;
+    playback.currentLine = line;
+    applyScenarioLine(line);
+    // AUTOアイコンの既存の発光演出をそのまま流用し、自動進行中であることを示す
+    state.autoActive = line.advanceMode === "auto";
+    autoActiveToggle.checked = state.autoActive;
+    if (line.advanceMode === "auto") {
+      playback.timerId = setTimeout(() => advanceScenarioPlayback(), Math.max(0.1, line.autoDelaySec) * 1000);
+    }
+    renderAll();
+  }
+
+  // 自然終了・「録画を中止」ボタンの共通の後始末
+  function stopScenarioPlayback() {
+    if (!playback) return;
+    if (playback.timerId) clearTimeout(playback.timerId);
+    if (playback.rafId) cancelAnimationFrame(playback.rafId);
+    if (playback.mediaRecorder && playback.mediaRecorder.state !== "inactive") {
+      playback.mediaRecorder.stop(); // onstopでBlob化してダウンロードされる
+    }
+    if (playback.stream) playback.stream.getTracks().forEach((t) => t.stop());
+    document.body.classList.remove("is-scenario-playing");
+    state.autoActive = playback.prevAutoActive;
+    autoActiveToggle.checked = state.autoActive;
+    state.selectedId = playback.prevSelectedId;
+    state.activeCharId = null;
+    scenarioCancelBtn.hidden = true;
+    playback = null;
+    renderCharList();
+    renderCharEditor();
+    renderAll();
+  }
+
+  function startScenarioPlayback() {
+    // 録画専用のオフスクリーンcanvasにdrawSceneだけを毎フレーム描画する
+    // ——drawEditorOverlay（選択枠/ハンドル）は絶対に呼ばない。PNG書き出しが
+    // 別canvasを使って同じものを除外しているのと同じ理由。
+    const offscreenCanvas = document.createElement("canvas");
+    offscreenCanvas.width = CANVAS_W;
+    offscreenCanvas.height = CANVAS_H;
+    const offscreenCtx = offscreenCanvas.getContext("2d");
+
+    const mimeType = VIDEO_MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) || "";
+    let stream;
+    let mediaRecorder;
+    try {
+      stream = offscreenCanvas.captureStream(30);
+      mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
+    } catch (err) {
+      alert("録画の開始に失敗しました。");
+      console.error(err);
+      return;
+    }
+
+    const chunks = [];
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) chunks.push(e.data);
+    };
+    mediaRecorder.onstop = () => {
+      const blob = new Blob(chunks, { type: mimeType || "video/webm" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      const customName = sanitizeFilenameInput(videoNameInput.value);
+      a.href = url;
+      a.download = (customName || "scenario_" + timestampSuffix()) + ".webm";
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    playback = {
+      index: -1,
+      currentLine: null,
+      timerId: null,
+      rafId: null,
+      mediaRecorder,
+      stream,
+      offscreenCanvas,
+      offscreenCtx,
+      mimeType,
+      prevAutoActive: state.autoActive,
+      prevSelectedId: state.selectedId,
+    };
+
+    state.selectedId = null;
+    // 再生中はNEXT以外のキャンバス操作とコンソールの他パネルを無効化する
+    // （行のスナップショットは位置/拡縮を保持しないため、再生中に手が滑って
+    // ドラッグ/リサイズされると以降の行が誤った位置のまま録画され続ける）
+    document.body.classList.add("is-scenario-playing");
+    scenarioCancelBtn.hidden = false;
+    renderCharList();
+    renderCharEditor();
+
+    const tick = () => {
+      if (!playback) return;
+      drawScene(playback.offscreenCtx);
+      playback.rafId = requestAnimationFrame(tick);
+    };
+    playback.rafId = requestAnimationFrame(tick);
+
+    mediaRecorder.start();
+    goToScenarioLine(0);
+  }
+
+  scenarioPlayBtn.addEventListener("click", () => {
+    if (playback) return; // 二重起動防止
+    if (state.scenario.length === 0) {
+      alert("シナリオに行が1つもありません。");
+      return;
+    }
+    if (!("MediaRecorder" in window) || typeof canvas.captureStream !== "function") {
+      alert("お使いのブラウザは動画の録画（MediaRecorder）に対応していません。");
+      return;
+    }
+    startScenarioPlayback();
+  });
+
+  scenarioCancelBtn.addEventListener("click", () => {
+    stopScenarioPlayback();
+  });
+
   // ---------------- boot ----------------
   async function boot() {
     stageHint.textContent = "素材を読み込み中…";
@@ -3294,6 +3929,8 @@
     renderBgEditor();
     renderCharList();
     renderCharEditor();
+    renderScenarioList();
+    renderScenarioEditor();
     renderAll();
   }
 

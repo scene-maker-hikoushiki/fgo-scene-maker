@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Scenario Console — シナリオ画面メーカー</title>
+<title>Scenario Console — シナリオ画面メーカー（非公式ファンメイドツール）</title>
 <link rel="icon" type="image/png" href="assets/favicon.png">
 <link rel="stylesheet" href="style.css">
 </head>
@@ -47,7 +47,7 @@
   <aside class="console">
     <div class="console__header">
       <span class="console__title">CHALDEA&nbsp;CONSOLE</span>
-      <span class="console__sub">scene composer</span>
+      <span class="console__sub">scene composer（非公式ファンメイドツール）</span>
     </div>
 
     <div class="console__body">
@@ -84,6 +84,8 @@
           <input type="file" id="charInput" accept="image/*" hidden>
           <span>立ち絵を追加</span>
         </label>
+
+        <button type="button" class="btn btn--sm" id="reflowCharSlotsBtn" style="width:100%; margin-top:8px;">表示中のキャラを等間隔に並べる</button>
 
         <ul class="charlist" id="charList"><!-- JS populates --></ul>
 
@@ -275,12 +277,32 @@
         </label>
       </details>
 
+      <!-- シナリオ（動画保存機能一式。ロジックは維持したまま表面上のみ一旦非表示） -->
+      <details class="panel" open hidden>
+        <summary>
+          <div class="panel__title-row">
+            <h2 class="panel__title">シナリオ <span class="panel__count" id="scenarioCount">0</span></h2>
+          </div>
+        </summary>
+        <button type="button" class="btn btn--primary" id="scenarioAddLineBtn">現在の状態を行として追加</button>
+        <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、このボタンで1行として記録します。行に登場しないキャラクターは、その行では現在の表示状態のまま扱われます。</p>
+
+        <ul class="charlist charlist--scenario" id="scenarioList"><!-- JS populates --></ul>
+
+        <div class="panel__divider"></div>
+
+        <div id="scenarioEditor" class="char-editor char-editor--empty">
+          <p class="char-editor__empty-msg">行を選択すると、ここで進行方法を調整できます</p>
+        </div>
+      </details>
+
     </div>
 
     <div class="console__footer">
       <div class="footer-tabs" id="footerTabs">
         <button type="button" class="footer-tab is-active" id="footerTabExportBtn" data-tab="export">画像保存</button>
         <button type="button" class="footer-tab" id="footerTabProjectBtn" data-tab="project">プロジェクト</button>
+        <button type="button" class="footer-tab" id="footerTabVideoBtn" data-tab="video" hidden>動画保存</button>
       </div>
 
       <div class="footer-tab-panels">
@@ -305,6 +327,16 @@
             </label>
           </div>
         </div>
+
+        <div class="footer-tab-panel is-hidden" id="footerPanelVideo">
+          <label class="field" style="margin-bottom: 10px;">
+            <span class="field__label">ファイル名</span>
+            <input type="text" id="videoNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
+          </label>
+          <button class="btn btn--primary" id="scenarioPlayBtn">再生開始（録画）</button>
+          <button type="button" class="btn btn--danger btn--sm" id="scenarioCancelBtn" style="width:100%; margin-top:8px;" hidden>録画を中止</button>
+          <p class="field__hint">再生開始と同時に録画も始まり、最後の行が終わると自動でWebMファイルがダウンロードされます。録画中はこのタブを閉じたり最小化したりしないでください。</p>
+        </div>
       </div>
     </div>
   </aside>
@@ -316,6 +348,7 @@
     <span class="charlist__thumb"><img alt=""></span>
     <span class="charlist__name"></span>
     <span class="charlist__active-dot" title="最前面（暗くならない）"></span>
+    <button type="button" class="charlist__visibility-btn" title="表示のON/OFFを切り替え">👁</button>
     <button type="button" class="charlist__del" title="このキャラクターを削除">×</button>
   </li>
 </template>
@@ -327,6 +360,19 @@
     <span class="charlist__name"></span>
     <span class="charlist__active-dot" title="表示中の背景"></span>
     <button type="button" class="charlist__del" title="この背景を削除">×</button>
+  </li>
+</template>
+
+<!-- scenario line item template -->
+<template id="scenarioItemTemplate">
+  <li class="charlist__item charlist__item--scenario" data-id="">
+    <span class="charlist__drag-handle" title="ドラッグで並び替え">⠿</span>
+    <span class="charlist__scenario-preview">
+      <span class="charlist__scenario-speaker"></span>
+      <span class="charlist__scenario-body"></span>
+    </span>
+    <span class="charlist__scenario-mode"></span>
+    <button type="button" class="charlist__del" title="この行を削除">×</button>
   </li>
 </template>
 

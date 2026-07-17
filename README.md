@@ -1,7 +1,9 @@
-# シナリオ画面メーカー（FGO風）
+# シナリオ画面メーカー（FGO風・非公式ファンメイドツール）
 
 Fate/Grand Order 風のシナリオ画面（背景・立ち絵・セリフウインドウ・選択肢など）を組んで、1600×900のPNG画像として書き出せるブラウザツールです。
 インストール不要・アカウント登録不要・外部送信なし。画像やテキストはすべてブラウザ内で処理されます。
+
+> 本ツールは個人が趣味で制作した非公式のファンメイドツールです。TYPE-MOON / Aniplex / Delightworks等、Fate/Grand Orderの権利者とは一切関係ありません。
 
 🔗 **Web版**: https://scene-maker-hikoushiki.github.io/fgo-scene-maker/
 
