@@ -285,7 +285,9 @@ body.is-scenario-playing .console__body {
 }
 
 .console__terms {
-  margin: 12px 0 0;
+  margin: 18px 0 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--line-cyan-dimmer);
   font-size: 10.5px;
   line-height: 1.5;
   color: var(--text-faint);
