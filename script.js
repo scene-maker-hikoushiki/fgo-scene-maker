@@ -1597,7 +1597,7 @@
     context.textBaseline = "bottom";
     context.shadowColor = "rgba(0, 0, 0, 0.6)";
     context.shadowBlur = 4;
-    context.fillStyle = "rgba(255, 255, 255, 0.5)";
+    context.fillStyle = "rgba(255, 255, 255, 0.8)";
     context.fillText("非公式ファンメイドツール", CANVAS_W - 40, ICON_LOG_Y - 20);
     context.restore();
   }
