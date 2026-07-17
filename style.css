@@ -284,6 +284,21 @@ body.is-scenario-playing .console__body {
   border-top: 1px solid var(--line-cyan-dim);
 }
 
+.console__terms {
+  margin: 12px 0 0;
+  font-size: 10.5px;
+  line-height: 1.5;
+  color: var(--text-faint);
+  letter-spacing: 0.01em;
+}
+.console__terms a {
+  color: var(--line-cyan);
+  word-break: break-all;
+}
+.console__terms a:hover {
+  text-decoration: none;
+}
+
 .footer-tabs {
   display: flex;
   gap: 6px;

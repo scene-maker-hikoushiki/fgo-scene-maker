@@ -1595,10 +1595,16 @@
     context.font = "40px " + bodyFontStack();
     context.textAlign = "right";
     context.textBaseline = "bottom";
-    context.shadowColor = "rgba(0, 0, 0, 0.6)";
-    context.shadowBlur = 4;
+    // ぼかしただけの影は明るい背景の上だとほとんど溶けて見えなくなるため、
+    // 縁取り（strokeText）で背景の明暗によらず一定のコントラストを確保する
+    context.lineJoin = "round";
+    context.lineWidth = 6;
+    context.strokeStyle = "rgba(0, 0, 0, 0.55)";
     context.fillStyle = "rgba(255, 255, 255, 0.8)";
-    context.fillText("非公式シナリオ画面メーカー", CANVAS_W - 40, ICON_LOG_Y - 20);
+    const x = CANVAS_W - 40;
+    const y = ICON_LOG_Y - 20;
+    context.strokeText("非公式シナリオ画面メーカー", x, y);
+    context.fillText("非公式シナリオ画面メーカー", x, y);
     context.restore();
   }
 
