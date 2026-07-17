@@ -1,0 +1,999 @@
+/* =====================================================================
+   Scenario Console — design tokens
+   Grounded in the subject: a holographic command-room editor for
+   building visual-novel style scenario screens.
+   ===================================================================== */
+:root {
+  --bg-void: #05070d;
+  --bg-panel: #0e1526;
+  --bg-panel-raised: #161f36;
+  --bg-input: #0c1220;
+
+  --line-cyan: #45d6ff;
+  --line-cyan-dim: rgba(69, 214, 255, 0.22);
+  --line-cyan-dimmer: rgba(69, 214, 255, 0.1);
+
+  --text-primary: #e9f2ff;
+  --text-muted: #7c8bab;
+  --text-faint: #4d5875;
+
+  --accent-gold: #d8b26a;
+  --accent-gold-dim: rgba(216, 178, 106, 0.18);
+
+  --danger: #ff6b76;
+  --danger-dim: rgba(255, 107, 118, 0.15);
+
+  --radius-s: 6px;
+  --radius-m: 10px;
+  --radius-l: 16px;
+  --console-width: 360px;
+
+  --font-ui: -apple-system, "Hiragino Sans", "Yu Gothic UI", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SFMono-Regular", "Consolas", "Menlo", monospace;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-void);
+  color: var(--text-primary);
+  font-family: var(--font-ui);
+  overflow: hidden;
+}
+
+button, input, textarea {
+  font-family: inherit;
+  color: inherit;
+}
+
+:focus-visible {
+  outline: 2px solid var(--line-cyan);
+  outline-offset: 2px;
+}
+
+/* subtle ambient grid on the void, evokes the bridge/monitor room */
+body::before {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  background-image:
+    linear-gradient(var(--line-cyan-dimmer) 1px, transparent 1px),
+    linear-gradient(90deg, var(--line-cyan-dimmer) 1px, transparent 1px);
+  background-size: 48px 48px;
+  opacity: 0.35;
+  z-index: 0;
+}
+
+.app {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+}
+
+/* ================= STAGE (canvas area) ================= */
+.stage {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  padding: 28px;
+  min-width: 0;
+}
+
+.stage__header {
+  width: 100%;
+  max-width: 1100px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+}
+
+.stage__eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  letter-spacing: 0.22em;
+  color: var(--line-cyan);
+  text-transform: uppercase;
+}
+
+.stage__res {
+  font-family: var(--font-mono);
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+}
+
+.stage__header-right {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* スマホ幅でだけ現れるプレビュー表示切替スイッチ（下のメディアクエリ内で
+   display切り替え）。デスクトップではプレビューとコンソールが横並びで
+   常に両方見えるので不要。他の「〇〇を表示」系スイッチと見た目・挙動を
+   揃えるため、独自ボタンではなく共通の.switchコンポーネントを使う。 */
+.stage__preview-switch {
+  display: none;
+  align-items: center;
+  gap: 8px;
+  font-size: 11px;
+  color: var(--text-muted);
+  letter-spacing: 0.05em;
+  cursor: pointer;
+}
+
+.monitor {
+  position: relative;
+  width: 100%;
+  /* +28pxは左右パディング(14px×2)の分。中身のフレームが1100pxで頭打ちになるのは元と同じ */
+  max-width: calc(1100px + 28px);
+  padding: 14px;
+}
+
+.monitor__frame {
+  position: relative;
+  width: 100%;
+  /* aspect-ratioはここに置く。.monitor側に置くと固定14pxパディングの比率が
+     縮小時に無視できなくなり、コンソール幅を変えるとわずかに16:9からズレていた */
+  aspect-ratio: 16 / 9;
+  border-radius: var(--radius-m);
+  background: #000;
+  box-shadow:
+    0 0 0 1px var(--line-cyan-dim),
+    0 30px 80px -20px rgba(0,0,0,0.7),
+    inset 0 0 40px rgba(69, 214, 255, 0.05);
+  overflow: hidden;
+}
+
+#sceneCanvas {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: grab;
+  /* デフォルトのtouch-action:autoのままだと、立ち絵のドラッグ移動/拡縮を
+     ブラウザがページのスクロール/ピンチズームのジェスチャーと誤認して
+     横取りしてしまう。すべてこちらのpointerイベントで処理するので、
+     ブラウザ側のタッチジェスチャーは無効化する。 */
+  touch-action: none;
+}
+#sceneCanvas.is-dragging { cursor: grabbing; }
+
+/* corner brackets — the signature HUD element */
+.monitor__corner {
+  position: absolute;
+  width: 26px;
+  height: 26px;
+  border: 2px solid var(--line-cyan);
+  opacity: 0.85;
+  z-index: 2;
+}
+.monitor__corner--tl { top: 0; left: 0; border-right: none; border-bottom: none; border-top-left-radius: 4px; }
+.monitor__corner--tr { top: 0; right: 0; border-left: none; border-bottom: none; border-top-right-radius: 4px; }
+.monitor__corner--bl { bottom: 0; left: 0; border-right: none; border-top: none; border-bottom-left-radius: 4px; }
+.monitor__corner--br { bottom: 0; right: 0; border-left: none; border-top: none; border-bottom-right-radius: 4px; }
+
+.stage__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--text-muted);
+  letter-spacing: 0.01em;
+}
+
+/* ================= RESIZER (drag handle between stage/console) ================= */
+.resizer {
+  flex-shrink: 0;
+  width: 6px;
+  cursor: col-resize;
+  background: transparent;
+  position: relative;
+  z-index: 2;
+  touch-action: none;
+}
+.resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  transform: translateX(-50%);
+  background: var(--line-cyan-dim);
+  transition: background .15s ease, width .15s ease;
+}
+.resizer:hover::after,
+.resizer.is-dragging::after {
+  background: var(--line-cyan);
+  width: 2px;
+}
+
+body.is-resizing-console {
+  cursor: col-resize;
+  user-select: none;
+}
+
+/* ================= CONSOLE (sidebar) ================= */
+.console {
+  width: var(--console-width);
+  flex-shrink: 0;
+  background: var(--bg-panel);
+  border-left: 1px solid var(--line-cyan-dim);
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+}
+
+.console__header {
+  padding: 20px 22px 14px;
+  border-bottom: 1px solid var(--line-cyan-dim);
+  flex-shrink: 0;
+}
+
+.console__title {
+  display: block;
+  font-family: var(--font-mono);
+  font-size: 13px;
+  letter-spacing: 0.18em;
+  color: var(--text-primary);
+}
+
+.console__sub {
+  display: block;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.05em;
+  margin-top: 2px;
+}
+
+.console__body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 10px 22px 18px;
+  container-type: inline-size;
+  container-name: console;
+}
+
+.console__body::-webkit-scrollbar { width: 8px; }
+.console__body::-webkit-scrollbar-thumb {
+  background: var(--bg-panel-raised);
+  border-radius: 4px;
+}
+
+.console__footer {
+  flex-shrink: 0;
+  padding: 16px 22px 20px;
+  border-top: 1px solid var(--line-cyan-dim);
+}
+
+.footer-tabs {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.footer-tab {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--line-cyan-dim);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.footer-tab:hover { border-color: var(--line-cyan); color: var(--text-primary); }
+.footer-tab.is-active {
+  background: var(--line-cyan-dimmer);
+  border-color: var(--line-cyan);
+  color: var(--line-cyan);
+  font-weight: 600;
+}
+
+/* Both panels occupy the same grid cell so the container's height is
+   always the taller of the two, regardless of which tab is active —
+   switching tabs only changes visibility, not layout, so the footer
+   never resizes. */
+.footer-tab-panels {
+  display: grid;
+}
+.footer-tab-panel {
+  grid-area: 1 / 1;
+}
+.footer-tab-panel.is-hidden {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.panel {
+  padding: 18px 0;
+  border-bottom: 1px solid var(--line-cyan-dimmer);
+}
+.panel:last-child { border-bottom: none; }
+
+/* .panel is a <details> element so each section can be collapsed to cut
+   down on how much is on screen at once — everything after <summary> is
+   just the section's existing content, hidden/shown natively by the
+   browser when closed/open. */
+.panel > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-s);
+  margin: -6px -8px 0;
+  padding: 6px 8px;
+  transition: background .15s ease;
+  /* rapid/repeated clicks on the toggle otherwise get read as a
+     double-click and select the title text instead of just collapsing */
+  user-select: none;
+  -webkit-user-select: none;
+}
+.panel > summary:hover {
+  background: var(--line-cyan-dimmer);
+}
+.panel > summary::-webkit-details-marker { display: none; }
+.panel > summary::marker { content: ""; }
+.panel > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent var(--line-cyan);
+  transition: transform 0.15s ease;
+  /* a border-triangle's visual weight sits slightly below its own
+     geometric box, so align-items:center alone still reads as too low */
+  margin-top: -12px;
+}
+.panel[open] > summary::before {
+  transform: rotate(90deg);
+}
+.panel > summary .panel__title-row,
+.panel > summary .panel__title {
+  flex: 1;
+}
+
+.panel__title {
+  margin: 0 0 12px;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+
+.panel__title-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.panel__count {
+  font-family: var(--font-mono);
+  color: var(--line-cyan);
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.panel__row {
+  margin-top: 8px;
+}
+
+.panel__divider {
+  height: 1px;
+  background: var(--line-cyan-dimmer);
+  margin: 16px 0;
+}
+
+/* ---- buttons ---- */
+.btn {
+  appearance: none;
+  border: 1px solid var(--line-cyan-dim);
+  background: var(--bg-panel-raised);
+  color: var(--text-primary);
+  border-radius: var(--radius-s);
+  padding: 10px 14px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, transform .05s ease;
+  width: 100%;
+}
+.btn:hover { border-color: var(--line-cyan); }
+.btn:active { transform: translateY(1px); }
+.btn:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+  border-color: var(--line-cyan-dimmer);
+}
+.btn:disabled:hover { border-color: var(--line-cyan-dimmer); }
+
+.btn--sm { padding: 7px 10px; font-size: 12px; width: auto; }
+.btn--ghost { background: transparent; }
+.btn--danger { border-color: var(--danger-dim); color: var(--danger); }
+.btn--danger:hover { border-color: var(--danger); }
+
+.btn--primary {
+  background: linear-gradient(180deg, var(--accent-gold), #b98f47);
+  color: #1a1204;
+  border: none;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  padding: 13px 14px;
+  box-shadow: 0 8px 20px -8px rgba(216,178,106,0.6);
+}
+.btn--primary:hover { filter: brightness(1.06); }
+
+.btn-row { display: flex; gap: 8px; }
+.btn-row .btn { flex: 1; }
+
+.filebtn {
+  display: block;
+  text-align: center;
+  border: 1px dashed var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  padding: 10px;
+  font-size: 12.5px;
+  color: var(--line-cyan);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.filebtn:hover { border-color: var(--line-cyan); background: var(--line-cyan-dimmer); }
+
+/* ---- character list ---- */
+.charlist {
+  list-style: none;
+  margin: 12px 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.charlist__item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: var(--radius-s);
+  border: 1px solid transparent;
+  background: var(--bg-panel-raised);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.charlist__item:hover { border-color: var(--line-cyan-dim); }
+.charlist__item.is-selected { border-color: var(--line-cyan); background: var(--line-cyan-dimmer); }
+
+.charlist__thumb {
+  width: 30px;
+  height: 30px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.charlist__thumb img { width: 100%; height: 100%; object-fit: cover; }
+
+.charlist__name {
+  flex: 1;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.charlist__name-input {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--line-cyan);
+  border-radius: 3px;
+  padding: 1px 4px;
+}
+
+.charlist__active-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  flex-shrink: 0;
+}
+.charlist__item.is-active .charlist__active-dot {
+  background: var(--line-cyan);
+  box-shadow: 0 0 6px var(--line-cyan);
+}
+
+.charlist__item.is-hidden {
+  opacity: 0.45;
+}
+
+.charlist__del {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--danger-dim);
+  background: transparent;
+  color: var(--danger);
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+}
+.charlist__del:hover {
+  border-color: var(--danger);
+  background: rgba(255, 80, 80, 0.12);
+}
+
+/* ---- character editor ---- */
+.char-editor__hint {
+  font-size: 11px;
+  color: var(--text-faint);
+  margin: 4px 0 0;
+}
+
+.char-editor--empty .char-editor__empty-msg {
+  font-size: 12px;
+  color: var(--text-faint);
+  margin: 4px 0 0;
+}
+
+.char-editor__row {
+  display: flex;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+/* .field's margin-top is only zeroed for :first-child (meant for fields
+   stacked vertically) — inside a .char-editor__row they sit side by side
+   instead, so every non-first .field would otherwise start lower than its
+   neighbors (visible as e.g. the departure fade end/start inputs). */
+.char-editor__row > .field {
+  margin-top: 0;
+}
+
+.char-editor__row--toggles {
+  gap: 8px;
+  margin-bottom: 14px;
+}
+.mini-toggle {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.expr-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.expr-editor__fields-col {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+/* コンソール幅が十分あるときだけ、プレビューを横に固定表示して
+   数値をいじりながら見比べられるようにする */
+@container console (min-width: 560px) {
+  .expr-editor {
+    flex-direction: row;
+    align-items: flex-start;
+    gap: 16px;
+  }
+  .expr-editor__preview-col {
+    flex: 0 0 300px;
+    position: sticky;
+    top: 4px;
+  }
+  .expr-editor__fields-col {
+    flex: 1;
+    min-width: 0;
+  }
+  .expr-editor__quad,
+  .expr-editor__triple {
+    gap: 10px;
+  }
+  .expr-editor__quad .field__input,
+  .expr-editor__triple .field__input {
+    padding: 10px 11px;
+    font-size: 13.5px;
+  }
+}
+
+@container console (min-width: 760px) {
+  .expr-editor__preview-col {
+    flex-basis: 340px;
+  }
+}
+
+.expr-editor__preview {
+  display: block;
+  width: 100%;
+  height: auto;
+  margin-top: 8px;
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  background-color: #2a2a2a;
+  background-image:
+    linear-gradient(45deg, #1a1a1a 25%, transparent 25%, transparent 75%, #1a1a1a 75%),
+    linear-gradient(45deg, #1a1a1a 25%, transparent 25%, transparent 75%, #1a1a1a 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 8px 8px;
+}
+
+/* each group's border/label color matches its overlay rect color in the
+   preview canvas (see renderExprPreview's strokeRect calls), so it's
+   obvious at a glance which fields drive which colored box on screen */
+.expr-editor__group {
+  border: 1px solid var(--group-border);
+  background: var(--group-bg);
+  border-radius: var(--radius-s);
+  padding: 10px 10px 12px;
+  margin-top: 16px;
+}
+.expr-editor__group:first-child { margin-top: 0; }
+.expr-editor__group > .char-editor__label:first-child { margin-top: 0; }
+.expr-editor__group .char-editor__label { color: var(--group-border); }
+
+.expr-editor__group--body { --group-border: #45d6ff; --group-bg: rgba(69, 214, 255, 0.07); }
+.expr-editor__group--face { --group-border: #ff45d6; --group-bg: rgba(255, 69, 214, 0.07); }
+.expr-editor__group--grid { --group-border: #ffd645; --group-bg: rgba(255, 214, 69, 0.07); }
+
+/* neutral version of .expr-editor__group — just a bordered box to visually
+   tie a slider to the toggles it controls, without any color-coding */
+.field-box {
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  padding: 10px 10px 12px;
+  margin-top: 16px;
+}
+.field-box:first-child { margin-top: 0; }
+.field-box > .char-editor__label:first-child { margin-top: 0; }
+
+.expr-editor__quad {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-top: 10px;
+}
+.expr-editor__quad .field,
+.expr-editor__triple .field {
+  margin-top: 0;
+}
+
+.expr-editor__triple {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.expr-editor__thumbs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.expr-editor__thumb-btn {
+  border: 1px solid var(--line-cyan-dim);
+  background: var(--bg-input);
+  border-radius: var(--radius-s);
+  padding: 4px;
+  font-size: 11px;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.expr-editor__thumb-btn.is-selected {
+  border-color: var(--line-cyan);
+  color: var(--line-cyan);
+  box-shadow: 0 0 0 1px var(--line-cyan);
+}
+.expr-editor__thumb-canvas {
+  display: block;
+  border-radius: 2px;
+}
+
+.mini-toggle .char-editor__label {
+  margin: 0;
+  text-align: center;
+  font-size: 10px;
+}
+.mini-toggle .toggle-btn {
+  width: 100%;
+  padding: 6px 4px;
+  font-size: 11px;
+}
+
+.char-editor__label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: 14px 0 7px;
+  display: block;
+}
+
+.toggle-btn {
+  flex: 1;
+  border: 1px solid var(--line-cyan-dim);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border-radius: var(--radius-s);
+  padding: 8px 6px;
+  font-size: 12px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.toggle-btn:hover {
+  border-color: var(--line-cyan);
+  color: var(--text-primary);
+}
+.toggle-btn.is-on {
+  border-color: var(--line-cyan);
+  color: var(--line-cyan);
+  background: var(--line-cyan-dimmer);
+}
+.toggle-btn.is-on:hover {
+  color: var(--line-cyan);
+}
+
+/* ---- form fields ---- */
+.field {
+  display: block;
+  margin-top: 14px;
+}
+.field:first-child { margin-top: 0; }
+
+.field__label {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  margin-bottom: 7px;
+  text-transform: uppercase;
+}
+
+.field__input {
+  width: 100%;
+  background: var(--bg-input);
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  padding: 9px 10px;
+  font-size: 13px;
+  color: var(--text-primary);
+  resize: vertical;
+}
+.field__input:focus { border-color: var(--line-cyan); }
+.field__input:disabled { opacity: 0.55; cursor: not-allowed; }
+.field__input--area { line-height: 1.5; }
+
+.field__hint {
+  display: block;
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--text-faint);
+  letter-spacing: 0.01em;
+}
+
+.field__color {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 60px;
+  height: 36px;
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  background: var(--bg-input);
+  padding: 3px;
+  cursor: pointer;
+}
+.field__color::-webkit-color-swatch { border: none; border-radius: 4px; }
+
+.field__input--number {
+  width: 100% !important;
+  padding: 9px 10px;
+}
+
+.field__input--number-small {
+  width: 50px !important;
+  padding: 7px 6px !important;
+  font-size: 12px !important;
+  min-width: 50px;
+}
+
+.field--compact {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.field--compact .field__label {
+  margin-bottom: 0;
+}
+
+.field-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 12px;
+  margin-top: 12px;
+}
+.field-grid .field {
+  /* :first-child only zeroes the left column — without this the right
+     column keeps its 12px margin-top and sits visibly lower than the left */
+  margin-top: 0;
+}
+
+/* 文字サイズ column needs the room (slider + number input); 文字色 is just
+   a small fixed-size swatch, so give it only as much width as it needs
+   instead of an equal 1fr that starves the slider and leaves the color
+   column mostly empty. */
+.field-grid--fontrow {
+  grid-template-columns: 1fr auto;
+  align-items: start;
+}
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--line-cyan);
+  height: 20px;
+}
+
+/* ---- switch ---- */
+.switch-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  font-size: 12.5px;
+  color: var(--text-primary);
+  cursor: pointer;
+  padding: 6px 8px;
+  margin: 0 -8px;
+  border-radius: var(--radius-s);
+  transition: background .15s ease;
+}
+.switch-row:hover {
+  background: var(--line-cyan-dimmer);
+}
+
+.switch {
+  position: relative;
+  display: inline-block;
+  width: 38px;
+  height: 21px;
+  flex-shrink: 0;
+}
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+.switch__track {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-input);
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: 12px;
+  transition: background .15s ease;
+}
+.switch__track::before {
+  content: "";
+  position: absolute;
+  width: 15px;
+  height: 15px;
+  left: 2px;
+  top: 2px;
+  border-radius: 50%;
+  background: var(--text-faint);
+  transition: transform .15s ease, background .15s ease;
+}
+.switch input:checked + .switch__track {
+  border-color: var(--line-cyan);
+  background: var(--line-cyan-dimmer);
+}
+.switch input:checked + .switch__track::before {
+  transform: translateX(17px);
+  background: var(--line-cyan);
+  box-shadow: 0 0 6px var(--line-cyan);
+}
+
+/* responsive: stack on narrow viewports */
+@media (max-width: 860px) {
+  /* .appにoverflow-y:autoを付けていると、実際には（heightがautoで内容が
+     常に収まるため）overflowが起きないにも関わらず、position:stickyの
+     基準となる「最も近いスクロールコンテナ」としてブラウザに扱われて
+     しまい、.stageが本来追従すべきbodyのスクロールに対して追従しなく
+     なる。実際にスクロールするのはbody側なので、.appはoverflow指定を
+     持たせない。 */
+  .app { flex-direction: column; height: auto; }
+  body { overflow: auto; }
+  .resizer { display: none; }
+  .console { width: 100%; height: auto; border-left: none; border-top: 1px solid var(--line-cyan-dim); }
+
+  /* コンソールの長い操作パネル/表情差分編集をスクロールしながら触る間も
+     プレビューを画面上部に追従させる。stage自身が背景色を持つのは、
+     下にスクロールしてきたコンソールの内容が透けて見えないようにするため。 */
+  .stage {
+    position: sticky;
+    top: 0;
+    z-index: 5;
+    background: var(--bg-void);
+    padding: 12px 16px;
+    gap: 10px;
+  }
+  .stage__preview-switch {
+    display: flex;
+  }
+  /* オフの間は見た目だけ畳む——プレビューを再描画する処理自体は
+     動き続けるので、再度ONにした時点ですぐ最新の内容が表示される */
+  .stage--collapsed .monitor,
+  .stage--collapsed .stage__hint {
+    display: none;
+  }
+}
+
+/* タッチ操作が主な入力手段の環境（スマホ/タブレット）向けに、指では
+   狙いにくい小さめのコントロール類だけ当たり判定を広げる。画面幅では
+   なくpointer:coarseで判定するので、タッチ対応の大画面タブレット等でも
+   同様に適用される。 */
+@media (pointer: coarse) {
+  .charlist__del {
+    width: 32px;
+    height: 32px;
+    font-size: 15px;
+  }
+  .toggle-btn {
+    padding: 11px 8px;
+  }
+  .mini-toggle .toggle-btn {
+    padding: 11px 6px;
+  }
+  .footer-tab {
+    padding: 11px 10px;
+  }
+  .expr-editor__thumb-btn {
+    padding: 6px;
+  }
+  .switch {
+    width: 44px;
+    height: 24px;
+  }
+  .switch__track::before {
+    width: 18px;
+    height: 18px;
+    left: 3px;
+    top: 3px;
+  }
+  .switch input:checked + .switch__track::before {
+    transform: translateX(19px);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * { transition: none !important; }
+}
