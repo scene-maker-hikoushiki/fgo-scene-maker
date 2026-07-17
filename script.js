@@ -140,6 +140,13 @@
   const RUBY_FONT_RATIO = 0.4;     // 本文フォントサイズに対するルビの読みのサイズ比
   const RUBY_FONT_MAX = 32;        // 本文が大きいときにルビがウインドウをはみ出す前に頭打ちにする上限
   const LETTER_SPACING = 0.6;        // 文字間の追加スペース（px）
+
+  // シナリオ再生中のセリフ文字アニメーション（タイプライター表示＋退出
+  // スライド）用の定数。通常の静止編集・PNG書き出し時は使わない。
+  const TYPEWRITER_MS_PER_RUN = 40;      // ルビ単位含め、1「run」あたりの表示間隔(ms)
+  const DIALOGUE_EXIT_MS = 350;          // 退出アニメーションの所要時間(ms)
+  const DIALOGUE_EXIT_SLIDE_PX = 50;     // 退出時に上へスライドする距離(px)
+  const DIALOGUE_EXIT_CLIP_MARGIN = 120; // 退出中だけクリップ領域を上に広げる余白(px)。最大文字サイズ+ルビでもはみ出さない値
   // グラデーションの下端の色は、選ばれた文字色を暗くしたもの。
   // 元々の白→#AEAEAEのグラデーションと同じ比率（174/255）にしているので、
   // 白を選んだときはこれまで通りぴったり#AEAEAEになり、他の色を選んでも
@@ -1300,7 +1307,11 @@
   // どの行も、実際にルビが付いているかどうかに関わらずルビの読みに
   // 必要な縦方向のスペースを常に確保している——そのため、どこかに
   // ルビを追加/削除しても他の行の位置がずれることはない。
-  function renderBodyLines(context, lines, x, topY, fontSize, color) {
+  // revealCountを指定すると、先頭から数えてその数の分だけrunを描画した
+  // 時点で打ち切る（シナリオ再生中のタイプライター表示用）。省略時は
+  // Infinityになり、これまで通り全文を描画する——既存の呼び出し箇所
+  // （名前欄、静止時の本文描画）は挙動が変わらない。
+  function renderBodyLines(context, lines, x, topY, fontSize, color, revealCount = Infinity) {
     const rubyFontPx = rubyFontSize(fontSize);
     const lineHeight = Math.round(fontSize * 1.6 + fontSize * 0.0);
     context.textAlign = "left";
@@ -1311,12 +1322,17 @@
     context.shadowOffsetX = TEXT_SHADOW_OFFSET_X;
     context.shadowOffsetY = TEXT_SHADOW_OFFSET_Y;
 
-    lines.forEach((line, idx) => {
+    let revealed = 0;
+    outer:
+    for (let idx = 0; idx < lines.length; idx++) {
+      const line = lines[idx];
       const baselineY = topY + fontSize * BODY_ASCENT_RATIO + idx * lineHeight;
       let cursorX = x;
       const gradient = makeTextGradient(context, baselineY, fontSize, color);
 
       for (const run of line) {
+        if (revealed >= revealCount) break outer;
+        revealed++;
         if (run.type === "text") {
           context.font = fontSize + "px " + bodyFontStack();
           context.fillStyle = gradient;
@@ -1341,9 +1357,25 @@
           cursorX += w + LETTER_SPACING;
         }
       }
-    });
+    }
 
     context.restore();
+  }
+
+  // シナリオ再生中のセリフ表示アニメーション本体。typing/holdingは
+  // revealCountで打ち切ったrenderBodyLinesを、exitingは全文を上へ
+  // スライドさせながらフェードアウトさせて描画する。
+  function drawAnimatedBodyText(context, anim) {
+    if (anim.phase === "exiting") {
+      context.save();
+      context.globalAlpha = 1 - anim.exitProgress;
+      context.translate(0, -DIALOGUE_EXIT_SLIDE_PX * anim.exitProgress);
+      renderBodyLines(context, anim.lines, BODY_X, BODY_TOP_Y, anim.fontSize, anim.color);
+      context.restore();
+    } else {
+      const count = anim.phase === "holding" ? Infinity : anim.revealedRuns;
+      renderBodyLines(context, anim.lines, BODY_X, BODY_TOP_Y, anim.fontSize, anim.color, count);
+    }
   }
 
   // assets.nameBoxを`targetW`まで引き伸ばして描画する。左端の切り欠きと
@@ -1506,12 +1538,20 @@
       if (state.body) {
         context.save();
         context.beginPath();
-        context.rect(0, BOX_TOP - 4, CANVAS_W, CANVAS_H - (BOX_TOP - 4));
+        // シナリオ再生中の退出アニメーション中だけ、上へスライドする文字が
+        // 途中で切れないようクリップ領域を上に広げる
+        const exiting = playback && dialogueAnim && dialogueAnim.phase === "exiting";
+        const clipTop = exiting ? BOX_TOP - 4 - DIALOGUE_EXIT_CLIP_MARGIN : BOX_TOP - 4;
+        context.rect(0, clipTop, CANVAS_W, CANVAS_H - clipTop);
         context.clip();
 
-        const paragraphs = parseRubyText(state.body);
-        const lines = layoutBodyLines(context, paragraphs, BODY_MAX_WIDTH, state.fontSize);
-        renderBodyLines(context, lines, BODY_X, BODY_TOP_Y, state.fontSize, state.textColor);
+        if (playback && dialogueAnim) {
+          drawAnimatedBodyText(context, dialogueAnim);
+        } else {
+          const paragraphs = parseRubyText(state.body);
+          const lines = layoutBodyLines(context, paragraphs, BODY_MAX_WIDTH, state.fontSize);
+          renderBodyLines(context, lines, BODY_X, BODY_TOP_Y, state.fontSize, state.textColor);
+        }
 
         context.restore();
       }
@@ -1770,7 +1810,8 @@
   canvas.addEventListener("pointerdown", (evt) => {
     const pos = getCanvasPos(evt);
 
-    // 再生中の手動進行の行に限り、NEXTクリックを他の判定より優先する
+    // 再生中の手動進行の行に限り、NEXTクリックを他の判定より優先する。
+    // ただし文字が表示し終わる（またはそもそも選択肢行で凍結中）まではクリックを無視する
     if (
       playback &&
       playback.currentLine &&
@@ -1779,7 +1820,9 @@
       state.showNext &&
       hitNextIcon(pos)
     ) {
-      advanceScenarioPlayback();
+      if (!dialogueAnim || dialogueAnim.phase === "holding") {
+        advanceScenarioPlayback();
+      }
       return;
     }
     // 再生中はNEXT以外のキャンバス操作を無効化する——行のスナップショットは
@@ -3777,6 +3820,88 @@
   // ---------------- シナリオ再生・録画 ----------------
   const VIDEO_MIME_CANDIDATES = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
 
+  // セリフのタイプライター表示＋退出スライドの状態機械。シナリオ再生中
+  // だけ使う実行時オブジェクト（プロジェクトには保存しない）。
+  // { phase: "typing"|"holding"|"exiting", lines, totalRuns, revealedRuns,
+  //   fontSize, color, phaseStartTime, exitProgress, nextBody, nextFontSize, nextColor }
+  let dialogueAnim = null;
+
+  function startDialogueTyping(text, fontSize, color) {
+    const paragraphs = parseRubyText(text);
+    const lines = layoutBodyLines(ctx, paragraphs, BODY_MAX_WIDTH, fontSize);
+    const totalRuns = lines.reduce((n, line) => n + line.length, 0);
+    dialogueAnim = {
+      phase: "typing",
+      lines,
+      totalRuns,
+      revealedRuns: 0,
+      fontSize,
+      color,
+      phaseStartTime: performance.now(),
+      exitProgress: 0,
+      nextBody: null,
+      nextFontSize: null,
+      nextColor: null,
+    };
+  }
+
+  // 直前に何か表示中ならまず退出フェーズへ、何も無ければ（シナリオ最初の
+  // 行など）そのままタイプ表示を開始する。
+  function beginDialogueExit(nextBody, nextFontSize, nextColor) {
+    if (!dialogueAnim) {
+      startDialogueTyping(nextBody, nextFontSize, nextColor);
+      return;
+    }
+    dialogueAnim = {
+      ...dialogueAnim,
+      phase: "exiting",
+      phaseStartTime: performance.now(),
+      exitProgress: 0,
+      nextBody,
+      nextFontSize,
+      nextColor,
+    };
+  }
+
+  // 全文表示が完了した瞬間に呼ばれる。自動進行の場合はここで初めて
+  // 待機タイマーを張ることで、タイプライター表示中の時間が自動進行の
+  // 待ち秒数を食ってしまわないようにする。
+  function onDialogueFullyRevealed() {
+    if (playback && playback.pendingAutoAdvance != null) {
+      playback.timerId = setTimeout(() => advanceScenarioPlayback(), Math.max(0.1, playback.pendingAutoAdvance) * 1000);
+      playback.pendingAutoAdvance = null;
+      state.autoActive = true;
+      autoActiveToggle.checked = true;
+    }
+  }
+
+  // 再生中は毎フレーム呼ぶ。経過時間から表示進捗を計算するだけで、
+  // フレームレート依存の固定歩数は使わない。
+  function updateDialogueAnim() {
+    if (!dialogueAnim) return;
+    const now = performance.now();
+    if (dialogueAnim.phase === "typing") {
+      const elapsed = now - dialogueAnim.phaseStartTime;
+      const revealed = Math.min(dialogueAnim.totalRuns, Math.floor(elapsed / TYPEWRITER_MS_PER_RUN));
+      dialogueAnim.revealedRuns = revealed;
+      if (revealed >= dialogueAnim.totalRuns) {
+        dialogueAnim.phase = "holding";
+        onDialogueFullyRevealed();
+      }
+    } else if (dialogueAnim.phase === "exiting") {
+      const elapsed = now - dialogueAnim.phaseStartTime;
+      dialogueAnim.exitProgress = Math.min(1, elapsed / DIALOGUE_EXIT_MS);
+      if (dialogueAnim.exitProgress >= 1) {
+        const { nextBody, nextFontSize, nextColor } = dialogueAnim;
+        if (nextBody != null) {
+          startDialogueTyping(nextBody, nextFontSize, nextColor);
+        } else {
+          dialogueAnim = null;
+        }
+      }
+    }
+  }
+
   function advanceScenarioPlayback() {
     if (!playback) return;
     if (playback.timerId) {
@@ -3799,8 +3924,20 @@
     // AUTOアイコンの既存の発光演出をそのまま流用し、自動進行中であることを示す
     state.autoActive = line.advanceMode === "auto";
     autoActiveToggle.checked = state.autoActive;
-    if (line.advanceMode === "auto") {
-      playback.timerId = setTimeout(() => advanceScenarioPlayback(), Math.max(0.1, line.autoDelaySec) * 1000);
+
+    // line.showChoicesだけで判定すると、シナリオの最初の行がいきなり
+    // 選択肢表示だった場合（まだ凍結すべき前のテキストが無い）に本文が
+    // 一切タイプ表示されなくなる。「今まさに何か表示中で、それを凍結
+    // したまま選択肢を出せる」場合に限って凍結する。
+    if (line.showChoices && dialogueAnim) {
+      if (line.advanceMode === "auto") {
+        playback.timerId = setTimeout(() => advanceScenarioPlayback(), Math.max(0.1, line.autoDelaySec) * 1000);
+      }
+    } else {
+      // 自動進行の待ちタイマーは、タイプライター表示が完了してから
+      // onDialogueFullyRevealedが張る（表示中に秒数を消費させないため）
+      playback.pendingAutoAdvance = line.advanceMode === "auto" ? line.autoDelaySec : null;
+      beginDialogueExit(line.body, state.fontSize, state.textColor);
     }
     renderAll();
   }
@@ -3821,6 +3958,7 @@
     state.activeCharId = null;
     scenarioCancelBtn.hidden = true;
     playback = null;
+    dialogueAnim = null;
     renderCharList();
     renderCharEditor();
     renderAll();
@@ -3876,6 +4014,7 @@
       mimeType,
       prevAutoActive: state.autoActive,
       prevSelectedId: state.selectedId,
+      pendingAutoAdvance: null,
     };
 
     state.selectedId = null;
@@ -3887,8 +4026,12 @@
     renderCharList();
     renderCharEditor();
 
+    dialogueAnim = null; // 念のため、前回の再生分が残っていないことを保証する
     const tick = () => {
       if (!playback) return;
+      updateDialogueAnim();
+      drawScene(ctx);
+      drawEditorOverlay(ctx); // state.selectedIdは再生中null固定なので実質no-op
       drawScene(playback.offscreenCtx);
       playback.rafId = requestAnimationFrame(tick);
     };
