@@ -3393,6 +3393,43 @@
     return new Date().toISOString().replace(/[-:T.]/g, "").slice(0, 14);
   }
 
+  // iOS（iPhone/iPad）のSafari・および同エンジンを使う全てのiOSブラウザは、
+  // <a download>にdata:image/...のURIを指定しても、ダウンロードダイアログを
+  // 出さずにその場で画像を開く/表示するだけになることが多い（download属性の
+  // 挙動がPNG等Safariが自前で表示できる画像形式では長年不安定）。この場合
+  // 「ダウンロードできない」ように見える。blob URLに変えても解決しないことが
+  // 多いため、iOSでは新しいタブで開いて手動保存（長押し→「写真に保存」）して
+  // もらう方式にフォールバックする。
+  function isIOSDevice() {
+    const ua = navigator.userAgent;
+    // iPadOSはSafari上でMacとして名乗るため、UAだけでなくタッチ対応の
+    // Macintoshかどうかも合わせて判定する
+    return /iP(hone|od|ad)/.test(ua) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+  }
+
+  function downloadCanvasAsPng(canvas, filename) {
+    canvas.toBlob((blob) => {
+      if (!blob) {
+        alert("画像の書き出しに失敗しました。");
+        return;
+      }
+      const url = URL.createObjectURL(blob);
+      if (isIOSDevice()) {
+        window.open(url, "_blank");
+        alert("画像を新しいタブで開きました。表示された画像を長押しして「写真に保存」を選んでください。");
+      } else {
+        const a = document.createElement("a");
+        a.href = url;
+        a.download = filename;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+      }
+      // iOSの新規タブ側が読み込みを終えるまで多少猶予を持たせてから解放する
+      setTimeout(() => URL.revokeObjectURL(url), 60000);
+    }, "image/png");
+  }
+
   exportBtn.addEventListener("click", () => {
     const off = document.createElement("canvas");
     off.width = CANVAS_W;
@@ -3400,15 +3437,9 @@
     const octx = off.getContext("2d");
     drawScene(octx);
     try {
-      const url = off.toDataURL("image/png");
-      const a = document.createElement("a");
       const customName = sanitizeFilenameInput(exportNameInput.value);
       const stamp = timestampSuffix();
-      a.href = url;
-      a.download = (customName || "scenario_" + stamp) + ".png";
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
+      downloadCanvasAsPng(off, (customName || "scenario_" + stamp) + ".png");
     } catch (err) {
       alert(
         "画像の書き出しに失敗しました。ブラウザがローカルファイルの読み込みを制限している可能性があります。README記載のローカルサーバー経由での起動をお試しください。"
