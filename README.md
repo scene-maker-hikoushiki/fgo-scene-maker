@@ -49,7 +49,7 @@ fgo-scene-maker/
 ├─ index.html          … 画面本体
 ├─ style.css           … 見た目
 ├─ script.js           … 動作ロジック（Canvas描画・操作・PNG書き出し・プロジェクト保存/読込）
-├─ assets-data.js       … UI画像＋退去エフェクト動画（自動生成・埋め込み済み）※動作に必須
+├─ assets-data.js       … UI画像＋退去エフェクト/タップエフェクト動画（自動生成・埋め込み済み）※動作に必須
 ├─ font-data.js         … フォント（自動生成・埋め込み済み）※動作に必須
 ├─ build_assets.py      … assets/・fonts/ の中身から上記2つを再生成するスクリプト
 ├─ assets/              … UI画像・動画の元ファイル
@@ -57,6 +57,7 @@ fgo-scene-maker/
 │   ├─ name_box.png         … 名前欄タブ
 │   ├─ lines_box.png        … 選択肢のテキストボックス
 │   ├─ departure.mp4        … サーヴァント退去エフェクト
+│   ├─ tap.mp4              … 手動進行でタップ/クリックした位置に出す演出
 │   ├─ skip_button.png      … SKIPボタン
 │   ├─ log_button.png / auto_button.png / next.png … 右下のミニアイコン
 │   └─ favicon.png          … ブラウザタブ用アイコン

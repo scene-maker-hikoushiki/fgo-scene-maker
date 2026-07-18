@@ -154,6 +154,7 @@
 
   const ICON_SIZE = 64;            // LOG / AUTO
   const NEXT_SIZE = 128;           // NEXT（フィードバックにより2倍サイズに）
+  const TAP_EFFECT_SIZE = 240;     // 手動進行でタップした位置に出すエフェクトの高さ（px、キャンバス基準）
   const ICON_GAP = 0;              // gap between LOG and AUTO
   const ICON_NEXT_GAP = -22;         // AUTOとNEXTの間隔（詰め気味に）
   const ICON_OPACITY = 0.5;
@@ -244,6 +245,13 @@
     // シナリオ開始（先頭の特殊行）から、N(>=1)ならN番目の実質的な行から
     // 直接開始する（それより前の開始演出・行はスキップする）。
     scenarioStartLineNumber: 0,
+    // BGM。{ id, name, audio(<audio>), startLineId, endLineId }の並び。
+    // startLineId/endLineIdは実質的なシナリオ行（開始/終了の特殊行を除く）
+    // のidを指し、その2行の間（現在の並び順で）にある行の間だけ再生する。
+    // 複数トラックを入れられるが、再生範囲が重なるトラックは同時には
+    // 存在できない（追加直後は重なりうるが、その間は警告表示のみで
+    // ブロックはしない——重ならないよう調整するのはユーザー側の操作）
+    bgmTracks: [],
   };
 
   let nextCharId = 1;
@@ -254,7 +262,41 @@
   // GIFキャプチャ中の実行時状態。{ canvas, ctx, frames, lastSampleTime, ... }
   // モードが"gif"のときだけ使う（それ以外は常にnull）
   let gifCapture = null;
+
+  // BGMの<audio>要素をWeb Audio APIのグラフに載せるための共有ノード。
+  // 録画（MediaRecorder）にBGM音声を含めるには、<audio>要素をそのまま
+  // 再生するだけでは足りず、MediaStreamAudioDestinationNodeへ接続して
+  // そこから得られるMediaStreamのトラックをcanvas側の映像トラックと
+  // 合成する必要がある。トラックが複数あっても実際に鳴るのは常に
+  // 最大1つ（範囲が重ならない前提）なので、宛先は共通の1つで足りる。
+  // 遅延生成（ensureBgmAudioRouting）にしているのは、AudioContextの生成に
+  // ユーザー操作（ジェスチャー）が必要なブラウザがあるため——最初のBGM
+  // 追加やシナリオ再生開始は必ず何らかのクリックの延長で起きるので、
+  // そのタイミングで初めて生成すれば問題ない。
+  let bgmAudioCtx = null;
+  let bgmAudioDest = null;
+  function ensureBgmAudioRouting() {
+    if (bgmAudioCtx) return;
+    const AudioContextCtor = window.AudioContext || window.webkitAudioContext;
+    if (!AudioContextCtor) return; // 対応していないブラウザではBGMの録画同梱だけ諦める（再生自体は<audio>のデフォルト出力で可能）
+    bgmAudioCtx = new AudioContextCtor();
+    bgmAudioDest = bgmAudioCtx.createMediaStreamDestination();
+  }
+  // BGMの<audio>要素を一度だけWeb Audioグラフに接続する。スピーカーへの
+  // 出力（destination）と録画用の宛先（bgmAudioDest）の両方へ繋ぐことで、
+  // 通常再生時にきちんと耳に聞こえつつ、録画中は同じ音声がWebMにも
+  // 含まれるようにする。createMediaElementSourceは同じ要素に対して
+  // 二度呼ぶと例外になるため、接続済みかどうかをaudio自身に印を付けて防ぐ。
+  function connectBgmTrackForRouting(audio) {
+    ensureBgmAudioRouting();
+    if (!bgmAudioCtx || audio._bgmSourceConnected) return;
+    const source = bgmAudioCtx.createMediaElementSource(audio);
+    source.connect(bgmAudioCtx.destination);
+    source.connect(bgmAudioDest);
+    audio._bgmSourceConnected = true;
+  }
   let nextBgId = 1;
+  let nextBgmId = 1;
 
   // ---------------- DOM参照 ----------------
   const canvas = document.getElementById("sceneCanvas");
@@ -268,6 +310,11 @@
   const bgCount = document.getElementById("bgCount");
   const bgEditor = document.getElementById("bgEditor");
   const bgItemTemplate = document.getElementById("bgItemTemplate");
+
+  const bgmInput = document.getElementById("bgmInput");
+  const bgmList = document.getElementById("bgmList");
+  const bgmCount = document.getElementById("bgmCount");
+  const bgmItemTemplate = document.getElementById("bgmItemTemplate");
 
   const charInput = document.getElementById("charInput");
   const charAddLabel = document.getElementById("charAddLabel");
@@ -452,6 +499,9 @@
     // （getDepartureVideoEl参照）。<video>は一度に1つの時刻にしかシークできず、
     // 複数のキャラクターが同時に別々の進行度で退去している可能性があるため。
     if (data.departureVideo) assets.departureVideoSrc = data.departureVideo;
+    // タップエフェクトも同様にデータURIのまま保持する——1回ごとに専用の
+    // <video>を生成して使い捨てる（spawnTapEffect参照）
+    if (data.tapVideo) assets.tapVideoSrc = data.tapVideo;
   }
 
   async function loadFont() {
@@ -628,11 +678,38 @@
     state.characters.push(c);
   }
 
+  // シナリオ再生中、行が切り替わってキャラの表示状態（登場/退場）や
+  // 不透明度が変わった瞬間に、瞬時に切り替えるのではなくこの時間で
+  // 滑らかにフェードさせる——画面上でキャラが入れ替わるときに見た目が
+  // カクつかないようにするため。通常編集中（再生していない間）は
+  // アニメーションが一切開始されないため、この定数は影響しない。
+  const CHARACTER_FADE_MS = 300;
+
+  // c.opacity/c.visibleそのもの（＝行に保存される「目標値」）ではなく、
+  // 実際に今描画すべき不透明度（0-100）を返す——シナリオ再生中に
+  // applyScenarioLineが目標値を変えた直後は、_opacityAnimFrom/
+  // _opacityAnimStartTimeを使って滑らかに追従する。アニメーションが
+  // 開始されていないキャラ（通常編集中は常にこちら）は目標値をそのまま返す。
+  function getCharacterDisplayOpacity(c) {
+    const target = c.visible !== false ? c.opacity : 0;
+    if (c._opacityAnimStartTime == null) return target;
+    const t = Math.min(1, (performance.now() - c._opacityAnimStartTime) / CHARACTER_FADE_MS);
+    return c._opacityAnimFrom + (target - c._opacityAnimFrom) * t;
+  }
+
   // 「表示状態」ボタン（削除ボタンの隣）と透明度スライダーは別物——前者は
   // シーンへの登場/退場そのものを切り替えるON/OFF、後者はそのキャラが
   // 表示されている間のフェード具合を決める数値。どちらか一方でも満たさ
-  // なければ、そのキャラは描画・当たり判定・暗転判定のいずれからも
+  // なければ、そのキャラは当たり判定・暗転判定（誰が最前面/話者か）から
   // 除外される。c.visibleが未定義（古い保存データ等）の場合は表示中扱い。
+  //
+  // ここは目標値（c.opacity/c.visible）基準のまま——フェード中の見た目上の
+  // 不透明度（getCharacterDisplayOpacity）を基準にしてしまうと、フェード
+  // インし始めたばかりの新しい最前面キャラがまだ「不透明度ほぼ0」の間
+  // resolveFrontIndexに拾われず、話者名/暗転対象の判定が一瞬ずれてしまう
+  // ため。実際の描画（drawScene）だけは、フェードアウトの尾を最後まで
+  // 見せる必要があるので、こちらではなくgetCharacterDisplayOpacity()を
+  // 直接使って描画の可否を決めている。
   function isCharacterVisible(c) {
     return c.visible !== false && c.opacity > 0;
   }
@@ -773,6 +850,8 @@
       nameplateOn: state.nameplateOn,
       fontSize: state.fontSize,
       textColor: state.textColor,
+      activeBackgroundId: state.activeBackgroundId,
+      sceneColorMode: state.sceneColorMode,
       chars,
       showChoices: state.showChoices,
       choiceCount: state.choiceCount,
@@ -789,6 +868,13 @@
   // （「シナリオ開始」「シナリオ終了」の特殊行自体は数えない）。
   function hasRealScenarioLines() {
     return state.scenario.some((l) => !l.isStartingFade && !l.isEndingFade);
+  }
+
+  // 「シナリオ開始」「シナリオ終了」の特殊行を除いた、実質的な行だけの並び。
+  // BGMの再生範囲（開始行〜終了行）や並び替えパネルの先頭/末尾判定など、
+  // 「N行目」という数え方をする箇所はすべてこれを基準にする。
+  function getRealScenarioLines() {
+    return state.scenario.filter((l) => !l.isStartingFade && !l.isEndingFade);
   }
 
   // 行に登場するキャラのうち、退去エフェクトがONのキャラが1人でもいるか
@@ -876,6 +962,7 @@
     ensureSpecialScenarioLines();
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList(); // 実質的な行数が変わったので、BGMの範囲セレクトの選択肢も更新する
   }
 
   function updateScenarioLineFromLiveState(line) {
@@ -883,6 +970,7 @@
     Object.assign(line, fresh);
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList(); // 行のプレビュー文言（BGMセレクトの選択肢ラベル）が変わりうるため
   }
 
   // 保存済みの行を現在のライブ状態へ反映する（シナリオパネルで行をクリック
@@ -899,6 +987,19 @@
       // 復元してしまうため、行が指定する表情で必ず上書きする
       c.activeExpr = snap.activeExpr;
       c.variants[c.activeVariantIndex].activeExpr = snap.activeExpr;
+      // シナリオ再生中に限り、表示状態/不透明度の目標が変わった瞬間を
+      // 検知してフェードを開始する——現在実際に見えている（アニメ中かも
+      // しれない）不透明度を起点にすることで、フェードの途中でさらに
+      // 別の行へ切り替わっても不自然にジャンプしない。通常編集中（行を
+      // クリックして内容を読み込むだけの場合）は今まで通り即座に反映する。
+      if (playback) {
+        const newTarget = snap.visible !== false ? snap.opacity : 0;
+        const currentDisplay = getCharacterDisplayOpacity(c);
+        if (currentDisplay !== newTarget) {
+          c._opacityAnimFrom = currentDisplay;
+          c._opacityAnimStartTime = performance.now();
+        }
+      }
       c.visible = snap.visible !== false;
       c.opacity = snap.opacity;
       c.departureEnabled = !!snap.departureEnabled;
@@ -909,6 +1010,24 @@
       c.departureFadeStart = snap.departureFadeStart;
       c.departureFadeEnd = snap.departureFadeEnd;
       c.departureHue = snap.departureHue;
+    });
+    // 行を作った後に追加されたキャラなど、この行のスナップショットに
+    // 含まれていないキャラは「この場面には登場しない」ものとして非表示に
+    // する——各行が完結した状態を持つようにするため。これをしないと、
+    // 後から追加したキャラが常に「現在の生の表示状態」のまま出続けてしまい、
+    // 古い行を見返しても意図通りに隠れない（さらに、その行を更新すると
+    // その中途半端な状態がそのまま書き込まれてしまう）。
+    const snapshotCharIds = new Set(line.chars.map((snap) => snap.charId));
+    state.characters.forEach((c) => {
+      if (snapshotCharIds.has(c.id)) return;
+      if (playback) {
+        const currentDisplay = getCharacterDisplayOpacity(c);
+        if (currentDisplay !== 0) {
+          c._opacityAnimFrom = currentDisplay;
+          c._opacityAnimStartTime = performance.now();
+        }
+      }
+      c.visible = false;
     });
     // line.charsの並び順＝キャプチャ時のz順序（buildScenarioLineFromLiveStateが
     // state.charactersをそのままmapして作っているため）。行を適用する際に
@@ -936,17 +1055,29 @@
     state.nameplateOn = line.nameplateOn !== false;
     nameplateToggle.checked = state.nameplateOn;
 
-    // 古い保存データ（この機能追加前に作られた行）にはfontSize/textColorが
-    // 無いため、その場合は現在の値を変えずに保つ
-    if (typeof line.fontSize === "number") {
-      state.fontSize = line.fontSize;
-      fontSizeInput.value = state.fontSize;
-      document.getElementById("fontSizeNumber").value = state.fontSize;
+    // 他のフィールド（nameplateOn等）と同じく、古い保存データ（この機能追加
+    // 前に作られた行）にはfontSize/textColorが無いので、その場合はデフォルト
+    // 値にする——「今表示中の値を保つ」にすると、行を切り替えても数値上は
+    // 変わったままになり「選択した行の設定に切り替わらない」ことになるため
+    state.fontSize = typeof line.fontSize === "number" ? line.fontSize : BODY_DEFAULT_FONT_SIZE;
+    fontSizeInput.value = state.fontSize;
+    document.getElementById("fontSizeNumber").value = state.fontSize;
+    state.textColor = typeof line.textColor === "string" ? line.textColor : "#ffffff";
+    textColorInput.value = state.textColor;
+
+    // 背景は他の項目と違い「これが正解」というデフォルト値が無いため、行に
+    // 記録が無い（この機能追加前の行）、または該当背景が削除済みの場合は、
+    // 現在表示中の背景を変えずに保つ——背景が1枚も登録されていなければ
+    // 「未設定」だけが唯一あり得る状態なので、この場合も自然と一致する
+    if (state.backgrounds.some((b) => b.id === line.activeBackgroundId)) {
+      state.activeBackgroundId = line.activeBackgroundId;
     }
-    if (line.textColor) {
-      state.textColor = line.textColor;
-      textColorInput.value = state.textColor;
-    }
+    renderBgList();
+    renderBgEditor();
+
+    // シーン全体の色調は行ごとに変わる演出（回想シーンのセピア化等）なので、
+    // fontSize/textColorと同じくデフォルト値（"none"）へ確実に切り替える
+    applySceneColorMode(typeof line.sceneColorMode === "string" ? line.sceneColorMode : "none");
 
     state.showChoices = line.showChoices;
     choicesToggle.checked = state.showChoices;
@@ -969,6 +1100,124 @@
     renderAll();
   }
 
+  // BGMのフェードにかける時間（ms）。トラック間の切り替え・無音域への
+  // 移行など、通常の途中乗り換え用。切り替わりの瞬間（次の行に進んだ
+  // 瞬間、手動ならボタンを押した瞬間）に鳴らし始める設計なので、あまり
+  // 長いと次の行の間まで尾を引いてしまう——短めにしている。シナリオ終了の
+  // 暗転に合わせる場合だけ、呼び出し側でENDING_FADE_MSを渡す。
+  const BGM_TRANSITION_FADE_MS = 350;
+
+  // 指定した<audio>要素の音量を、現在値から0まで滑らかに下げてから一時停止
+  // する。setIntervalベースなので、シナリオ再生のtickループ（rAF）とは
+  // 独立して進む——一時停止・行送りで再生自体が止まっても後片付けは続く。
+  // 既に別のフェードが進行中の同じ要素に対して呼ばれた場合は、その場の
+  // 音量から仕切り直す（前のフェードを打ち切って重複させない）。
+  // onComplete（省略可）は、フェードが最後まで完了した時にだけ呼ばれる
+  // ——タイマーが別のフェード開始で打ち切られた場合は呼ばれない。
+  function fadeOutBgmAudio(audio, durationMs, onComplete) {
+    if (audio._bgmFadeTimer) {
+      clearInterval(audio._bgmFadeTimer);
+      audio._bgmFadeTimer = null;
+    }
+    const startVolume = audio.volume;
+    const startTime = performance.now();
+    audio._bgmFadeTimer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - startTime) / durationMs);
+      audio.volume = startVolume * (1 - t);
+      if (t >= 1) {
+        clearInterval(audio._bgmFadeTimer);
+        audio._bgmFadeTimer = null;
+        audio.pause();
+        audio.currentTime = 0;
+        if (onComplete) onComplete();
+      }
+    }, 50);
+  }
+
+  // fadeOutBgmAudioと対になる、0からtargetVolumeまで滑らかに上げるフェードイン。
+  // 何かが鳴っている状態から別のトラックへ切り替わる（クロスフェードする）
+  // 場合にだけ使う——無音からの開始は今まで通り即座にtargetVolumeで鳴らす。
+  function fadeInBgmAudio(audio, durationMs, targetVolume) {
+    if (audio._bgmFadeTimer) {
+      clearInterval(audio._bgmFadeTimer);
+      audio._bgmFadeTimer = null;
+    }
+    const startTime = performance.now();
+    audio._bgmFadeTimer = setInterval(() => {
+      const t = Math.min(1, (performance.now() - startTime) / durationMs);
+      audio.volume = targetVolume * t;
+      if (t >= 1) {
+        clearInterval(audio._bgmFadeTimer);
+        audio._bgmFadeTimer = null;
+      }
+    }, 50);
+  }
+
+  // 現在の実質的な行に応じて、鳴らすべきBGMトラックへ切り替える。範囲が
+  // 重ならない前提だったころの名残でfind()にしていた部分を、重なりを許す
+  // 前提の選び方に変更している——同じ行を複数トラックが覆っている場合は、
+  // 開始位置がより現在に近い（＝より新しく始まった）方を優先する。これに
+  // より「1曲目の終わりと2曲目の始まりを同じ行に置く」＝切り替え演出、
+  // という組み方ができる。
+  //
+  // 切り替えの検知は「今の行を覆うトラックが変わったかどうか」だけを見る
+  // ——終了に設定した行そのものではまだ何もせず、次の行へ進んだ瞬間
+  // （＝手動ならボタンを押した瞬間）に初めてフェードが始まる。終了行が
+  // シナリオの最終行と一致する場合は、この仕組みでは変化が検知されない
+  // （次の実質的な行が存在しない）ため、暗転（isEndingFade分岐）側で
+  // 別途フェードさせている。
+  //
+  // 前のトラックが鳴っていた場合、フェードアウトが完全に終わる（無音＋
+  // 一時停止まで完了する）のを待ってから次のトラックを鳴らし始める——
+  // 同時にクロスフェードさせるのではなく、無音の一瞬を挟んで順番に
+  // 入れ替える。次のトラックの開始自体はそのまま短くフェードインさせる。
+  //
+  // シナリオ再生中の行送り（goToScenarioLine）専用に呼ぶ——編集中に行を
+  // クリックしただけで音が鳴り出すと驚かせてしまうため、applyScenarioLine
+  // 本体からは呼ばない。
+  function updateBgmPlaybackForLine(line) {
+    const realLines = getRealScenarioLines();
+    const idx = realLines.findIndex((l) => l.id === line.id);
+
+    const candidates = idx === -1 ? [] : state.bgmTracks
+      .map((t) => ({ t, range: resolveBgmRange(t, realLines) }))
+      .filter((c) => c.range && idx >= c.range.start && idx <= c.range.end)
+      .sort((a, b) => b.range.start - a.range.start);
+    const track = candidates.length ? candidates[0].t : null;
+
+    const prevTrack = playback.currentBgmTrack;
+    if (track === prevTrack) return;
+    playback.currentBgmTrack = track;
+
+    const startTrack = (fadeIn) => {
+      // その間にさらに別の行へ進んでいたら（この開始待ちが古くなって
+      // いたら）、今さら鳴らし始めない——最新の切り替え処理に任せる
+      if (playback.currentBgmTrack !== track || !track) return;
+      if (track.audio._bgmFadeTimer) {
+        clearInterval(track.audio._bgmFadeTimer);
+        track.audio._bgmFadeTimer = null;
+      }
+      track.audio.currentTime = 0;
+      if (fadeIn) {
+        track.audio.volume = 0;
+        track.audio.play().catch(() => {});
+        fadeInBgmAudio(track.audio, BGM_TRANSITION_FADE_MS, track.volume);
+      } else {
+        track.audio.volume = track.volume;
+        track.audio.play().catch(() => {}); // 自動再生ブロック等で失敗しても録画/再生自体は続行する
+      }
+    };
+
+    if (prevTrack) {
+      // 無音からの開始ではない（何かが鳴っていた）ので、次のトラックは
+      // フェードアウト完了後にフェードインさせる
+      fadeOutBgmAudio(prevTrack.audio, BGM_TRANSITION_FADE_MS, () => startTrack(true));
+    } else if (track) {
+      // 無音からの開始は今まで通り即座にフル音量で鳴らす
+      startTrack(false);
+    }
+  }
+
   function moveScenarioLine(id, dir) {
     const i = state.scenario.findIndex((l) => l.id === id);
     // 開始行・終了行は常に先頭/最後尾に固定
@@ -979,16 +1228,222 @@
     ensureSpecialScenarioLines(); // 特殊行と入れ替わってしまった場合に定位置へ戻す
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList(); // 行の順序が変わるとBGMの範囲（開始/終了行の間）の意味も変わりうるため
   }
 
   function removeScenarioLine(id) {
     const target = state.scenario.find((l) => l.id === id);
     if (target && (target.isEndingFade || target.isStartingFade)) return; // 特殊行は削除できない（オンオフのみ）
+    reconcileBgmRangesForLineRemoval(id); // 削除前に呼ぶ——前後の実質的な行がまだ参照できるうちに
     state.scenario = state.scenario.filter((l) => l.id !== id);
     if (state.scenarioSelectedId === id) state.scenarioSelectedId = null;
     ensureSpecialScenarioLines(); // 他の行が0になった場合は特殊行も取り除く
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList();
+  }
+
+  // ---------------- BGM ----------------
+  // トラックの開始/終了行idを、現在のシナリオ並び順における実質的な行の
+  // インデックス（0始まり）に解決する。参照先の行が削除済みで見つからない
+  // 場合は、開始側は先頭(0)、終了側は末尾へフォールバックする——「この行より
+  // 前/後ろ全部」という意味に近く、範囲がいきなり消えてしまうよりは自然。
+  // realLinesが空（実質的な行が1つも無い）ならnullを返す。
+  function resolveBgmRange(track, realLines) {
+    if (realLines.length === 0) return null;
+    let startIdx = realLines.findIndex((l) => l.id === track.startLineId);
+    let endIdx = realLines.findIndex((l) => l.id === track.endLineId);
+    if (startIdx === -1) startIdx = 0;
+    if (endIdx === -1) endIdx = realLines.length - 1;
+    if (startIdx > endIdx) [startIdx, endIdx] = [endIdx, startIdx];
+    return { start: startIdx, end: endIdx };
+  }
+
+  // track自身を除いた他のトラックの中に、指定した範囲（実質的な行の
+  // インデックス、両端含む）と重なるものがあれば返す（無ければnull）。
+  function findOverlappingBgmTrack(track, startIdx, endIdx) {
+    const realLines = getRealScenarioLines();
+    return (
+      state.bgmTracks.find((other) => {
+        if (other === track) return false;
+        const range = resolveBgmRange(other, realLines);
+        return range && startIdx <= range.end && range.start <= endIdx;
+      }) || null
+    );
+  }
+
+  function addBgmFromFile(file) {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const audio = new Audio(reader.result);
+      audio.loop = true;
+      connectBgmTrackForRouting(audio);
+      const realLines = getRealScenarioLines();
+      const track = {
+        id: nextBgmId++,
+        name: file.name.replace(/\.[^.]+$/, ""),
+        audio,
+        volume: 1,
+        // デフォルトは開始/終了の特殊行を除いた1〜n全体
+        startLineId: realLines.length ? realLines[0].id : null,
+        endLineId: realLines.length ? realLines[realLines.length - 1].id : null,
+      };
+      state.bgmTracks.push(track);
+      renderBgmList();
+    };
+    reader.onerror = () => alert("BGMファイルの読み込みに失敗しました。");
+    reader.readAsDataURL(file);
+  }
+
+  function removeBgmTrack(id) {
+    const track = state.bgmTracks.find((t) => t.id === id);
+    if (track) {
+      track.audio.pause();
+      if (playback && playback.currentBgmTrack === track) playback.currentBgmTrack = null;
+    }
+    state.bgmTracks = state.bgmTracks.filter((t) => t.id !== id);
+    renderBgmList();
+  }
+
+  // 削除される行がいずれかのBGMトラックの開始/終了行として参照されている
+  // 場合、その境界を隣の実質的な行へ詰める（開始側は次の行へ、終了側は
+  // 前の行へ）——resolveBgmRangeのフォールバック（0/末尾）に落ちて範囲が
+  // 突然全体に広がってしまうのを防ぐため。
+  function reconcileBgmRangesForLineRemoval(id) {
+    if (state.bgmTracks.length === 0) return;
+    const realLines = getRealScenarioLines();
+    const idx = realLines.findIndex((l) => l.id === id);
+    if (idx === -1) return; // 特殊行、または既に実質的な行ではない
+    const prevId = idx > 0 ? realLines[idx - 1].id : null;
+    const nextId = idx < realLines.length - 1 ? realLines[idx + 1].id : null;
+    state.bgmTracks.forEach((t) => {
+      if (t.startLineId === id) t.startLineId = nextId;
+      if (t.endLineId === id) t.endLineId = prevId;
+    });
+  }
+
+  // ドラッグ中のBGMトラックid。wireCharDragHandle/wireScenarioDragHandleと
+  // 同じ方式——並び順自体は再生ロジックに影響しない（優先順位は範囲の
+  // 開始位置で決まる）が、一覧の見た目上の整理のために並び替えられる
+  // ようにする。
+  let bgmDragId = null;
+
+  function wireBgmDragHandle(node, track) {
+    const handle = node.querySelector(".charlist__drag-handle");
+    handle.addEventListener("pointerdown", (evt) => {
+      evt.preventDefault();
+      evt.stopPropagation();
+      bgmDragId = track.id;
+      node.classList.add("is-dragging");
+
+      const onMove = (moveEvt) => {
+        if (bgmDragId !== track.id) return;
+        const items = Array.from(bgmList.children);
+        for (const item of items) {
+          if (item === node) continue;
+          const rect = item.getBoundingClientRect();
+          const mid = rect.top + rect.height / 2;
+          if (moveEvt.clientY < mid) {
+            bgmList.insertBefore(node, item);
+            return;
+          }
+        }
+        bgmList.appendChild(node);
+      };
+      const onUp = () => {
+        if (bgmDragId !== track.id) return;
+        bgmDragId = null;
+        node.classList.remove("is-dragging");
+        window.removeEventListener("pointermove", onMove);
+        window.removeEventListener("pointerup", onUp);
+        window.removeEventListener("pointercancel", onUp);
+        const orderedIds = Array.from(bgmList.children).map((el) => Number(el.dataset.id));
+        state.bgmTracks.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
+        renderBgmList();
+      };
+      window.addEventListener("pointermove", onMove);
+      window.addEventListener("pointerup", onUp);
+      window.addEventListener("pointercancel", onUp);
+    });
+  }
+
+  function renderBgmList() {
+    bgmList.innerHTML = "";
+    const realLines = getRealScenarioLines();
+    state.bgmTracks.forEach((track) => {
+      const node = bgmItemTemplate.content.firstElementChild.cloneNode(true);
+      node.dataset.id = String(track.id);
+      node.querySelector(".charlist__name").textContent = track.name || "BGM";
+      wireInlineRename(
+        node,
+        track.name || "BGM",
+        (newName) => {
+          track.name = newName;
+          renderBgmList();
+        },
+        false
+      );
+      node.querySelector(".charlist__del").addEventListener("click", (e) => {
+        e.stopPropagation();
+        removeBgmTrack(track.id);
+      });
+      wireBgmDragHandle(node, track);
+
+      const volumeRange = node.querySelector(".bgm-volume__range");
+      const volumeValue = node.querySelector(".bgm-volume__value");
+      const volumePct = Math.round((typeof track.volume === "number" ? track.volume : 1) * 100);
+      volumeRange.value = String(volumePct);
+      volumeValue.textContent = String(volumePct);
+      volumeRange.addEventListener("input", (e) => {
+        const pct = Number(e.target.value);
+        track.volume = pct / 100;
+        volumeValue.textContent = String(pct);
+        // フェード中でなければ、鳴っていれば即座に反映する
+        // （フェード中は完了時にtrack.volumeが改めて基準になる）
+        if (!track.audio._bgmFadeTimer) track.audio.volume = track.volume;
+      });
+
+      const range = resolveBgmRange(track, realLines);
+      const startSelect = node.querySelector('[data-role="start"]');
+      const endSelect = node.querySelector('[data-role="end"]');
+      realLines.forEach((line, i) => {
+        const label = i + 1 + ". " + summarizeScenarioLine(line).title;
+        const optStart = document.createElement("option");
+        optStart.value = String(line.id);
+        optStart.textContent = label;
+        startSelect.appendChild(optStart);
+        const optEnd = optStart.cloneNode(true);
+        endSelect.appendChild(optEnd);
+      });
+      if (range) {
+        startSelect.value = String(realLines[range.start].id);
+        endSelect.value = String(realLines[range.end].id);
+      }
+      startSelect.disabled = endSelect.disabled = realLines.length === 0;
+
+      // 範囲が他のBGMと重なっていてもブロックはしない——複数追加した際の
+      // デフォルト（1〜n全体）同士は必ず重なるので、ブロックすると
+      // どちらの範囲も動かせないデッドロックになってしまう。重なりは
+      // has-overlap/警告表示で知らせるだけに留め、実際の重なり時の
+      // 再生の扱いはupdateBgmPlaybackForLine側（開始が新しい方を優先）に任せる。
+      const applyRangeChange = (which, newLineId) => {
+        const newIdx = getRealScenarioLines().findIndex((l) => l.id === newLineId);
+        if (newIdx === -1) return;
+        if (which === "start") track.startLineId = newLineId;
+        else track.endLineId = newLineId;
+        renderBgmList();
+      };
+      startSelect.addEventListener("change", (e) => applyRangeChange("start", Number(e.target.value)));
+      endSelect.addEventListener("change", (e) => applyRangeChange("end", Number(e.target.value)));
+
+      const warning = node.querySelector(".bgm-range__warning");
+      const overlapping = range && findOverlappingBgmTrack(track, range.start, range.end);
+      node.classList.toggle("has-overlap", !!overlapping);
+      warning.hidden = !overlapping;
+
+      bgmList.appendChild(node);
+    });
+    bgmCount.textContent = String(state.bgmTracks.length);
   }
 
   function addVariantFromFile(c, file) {
@@ -1424,6 +1879,50 @@
     context.restore();
   }
 
+  // ---- タップエフェクト（手動進行でクリック/タップした位置に出す演出） ----
+  // 退去エフェクトと違い進行度を追わず、押した瞬間に一度だけ最初から
+  // 最後まで再生させる使い捨ての<video>——同時に複数箇所タップされても
+  // それぞれ独立して鳴らせるよう、インスタンスごとに新しい<video>を作る。
+  let tapEffects = []; // { video, x, y }
+
+  function spawnTapEffect(x, y) {
+    if (!assets.tapVideoSrc) return;
+    const video = document.createElement("video");
+    video.src = assets.tapVideoSrc;
+    video.muted = true;
+    video.playsInline = true;
+    video.preload = "auto";
+    const effect = { video, x, y };
+    tapEffects.push(effect);
+    // 再生が終わったら一覧から取り除く——loop無しの一度きり再生なので、
+    // 通常は自然にendedが発火する
+    video.addEventListener("ended", () => {
+      tapEffects = tapEffects.filter((e) => e !== effect);
+    });
+    video.play().catch(() => {
+      // 再生に失敗した場合（自動再生ブロック等）は絵が一切出ないままに
+      // なってしまうので、一覧からも即座に取り除く
+      tapEffects = tapEffects.filter((e) => e !== effect);
+    });
+  }
+
+  // 現在アクティブな全タップエフェクトを描く。drawScene側から毎フレーム
+  // 呼ぶ——退去エフェクトと同じ加算合成（"screen"）で、UI（ボタン等）より
+  // さらに手前、最後に描画する。
+  function drawTapEffects(context) {
+    if (tapEffects.length === 0) return;
+    tapEffects.forEach(({ video, x, y }) => {
+      if (video.readyState < 2 || !video.videoWidth) return; // まだフレームがデコードされていない
+      const h = TAP_EFFECT_SIZE;
+      const w = h * (video.videoWidth / video.videoHeight);
+      context.save();
+      context.globalAlpha = 1;
+      context.globalCompositeOperation = "screen";
+      context.drawImage(video, x - w / 2, y - h / 2, w, h);
+      context.restore();
+    });
+  }
+
   // ---- ルビ（ふりがな）対応 ----
   // 記法（青空文庫のテキストと同じ慣習）:
   //   漢字《かんじ》        → ベースは"《"の直前に連続する漢字の並びから
@@ -1741,7 +2240,12 @@
     // 他の全員が暗くなったままになってはいけない（resolveFrontIndex参照）
     let frontIndex = resolveFrontIndex();
     state.characters.forEach((c, i) => {
-      if (!isCharacterVisible(c)) return;
+      // 描画の可否は目標値（isCharacterVisible）ではなく、フェード中の
+      // 見た目上の不透明度で判定する——フェードアウトの目標が「非表示」に
+      // なった瞬間に描画自体を打ち切ってしまうと、尾を引くフェードが
+      // 表示されなくなってしまうため。
+      const displayOpacity = getCharacterDisplayOpacity(c);
+      if (displayOpacity <= 0) return;
       const { w, h } = charBBox(c);
       const dim = state.dimInactive && state.characters.length > 1 && i !== frontIndex;
 
@@ -1757,7 +2261,7 @@
       if (charFilter) filters.push(charFilter);
       if (dim) filters.push("brightness(55%) saturate(92%)");
       if (filters.length) context.filter = filters.join(" ");
-      context.globalAlpha = c.opacity / 100;
+      context.globalAlpha = displayOpacity / 100;
       drawCharacterSprite(context, c, w, h);
       if (c.departureEnabled) drawDepartureEffect(context, c, h);
       context.restore();
@@ -1945,6 +2449,7 @@
       }
     }
 
+    drawTapEffects(context);
     drawWatermark(context);
   }
 
@@ -2088,6 +2593,7 @@
     const charImgs = source.characters.map((c) => c.img);
     const charVariantImgs = source.characters.map((c) => c.variants.map((v) => v.img));
     const charVideos = source.characters.map((c) => c._departureVideoEl || null);
+    const bgmAudios = source.bgmTracks.map((t) => t.audio);
 
     source.backgrounds.forEach((b) => {
       b.img = null;
@@ -2098,6 +2604,9 @@
         v.img = null;
       });
       delete c._departureVideoEl;
+    });
+    source.bgmTracks.forEach((t) => {
+      t.audio = null;
     });
 
     let cloned, digest;
@@ -2115,6 +2624,9 @@
         });
         if (charVideos[i]) c._departureVideoEl = charVideos[i];
       });
+      source.bgmTracks.forEach((t, i) => {
+        t.audio = bgmAudios[i];
+      });
     }
 
     cloned.backgrounds.forEach((b, i) => {
@@ -2126,6 +2638,9 @@
         v.img = charVariantImgs[i][j];
       });
       if (charVideos[i]) c._departureVideoEl = charVideos[i];
+    });
+    cloned.bgmTracks.forEach((t, i) => {
+      t.audio = bgmAudios[i];
     });
 
     return { data: cloned, digest };
@@ -2304,6 +2819,11 @@
       // 暗転演出中（開始・終了どちらも）は一切のクリックを無視する
       // （SKIPの連打による再トリガーも防ぐ）
       if (startingFadeAnim || endingFadeAnim) return;
+
+      // 選択肢・SKIPなど、実際に何が起きるかに関わらず、再生中に受け付ける
+      // クリック/タップには必ずその位置へ演出を出す（本家のタップ演出と
+      // 同じ感覚——「押した場所が分かる」フィードバック自体が目的のため）
+      spawnTapEffect(pos.x, pos.y);
 
       // SKIPは進行方式や選択肢の有無に関わらず、常に再生を中止する。
       // 「暗転して終了」行が有効な間はSKIPでも暗転を挟んでから終了する。
@@ -2532,10 +3052,10 @@
   // エクスプローラー風のリネーム：単なるクリックは選択のみ（liの
   // クリックリスナー側で処理）。すでに選択済みの状態で名前を再度
   // クリックすると、その場でテキスト入力に切り替わる。
-  function wireInlineRename(node, name, commit) {
+  function wireInlineRename(node, name, commit, requireSelected = true) {
     const nameSpan = node.querySelector(".charlist__name");
     nameSpan.addEventListener("click", (e) => {
-      if (!node.classList.contains("is-selected")) return;
+      if (requireSelected && !node.classList.contains("is-selected")) return;
       e.stopPropagation();
 
       const input = document.createElement("input");
@@ -3620,6 +4140,7 @@
         ensureSpecialScenarioLines(); // 開始行/終了行の前後へドロップされた場合も定位置へ戻す
         renderScenarioList();
         renderScenarioEditor();
+        renderBgmList(); // 行の順序が変わるとBGMの範囲（開始/終了行の間）の意味も変わりうるため
       };
       window.addEventListener("pointermove", onMove);
       window.addEventListener("pointerup", onUp);
@@ -3691,7 +4212,7 @@
     scenarioEditor.className = "char-editor";
     // 先頭の「シナリオ開始」・末尾の「シナリオ終了」の特殊行は並び替え
     // 対象に含めない——実質的な先頭/最後尾はそれらを除いた行になる
-    const realLines = state.scenario.filter((l) => !l.isStartingFade && !l.isEndingFade);
+    const realLines = getRealScenarioLines();
     const realIndex = realLines.findIndex((l) => l.id === line.id);
     const isFirst = realIndex === 0;
     const isLast = realIndex === realLines.length - 1;
@@ -3806,6 +4327,12 @@
   charInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (file) addCharacterFromFile(file);
+    e.target.value = "";
+  });
+
+  bgmInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) addBgmFromFile(file);
     e.target.value = "";
   });
 
@@ -4155,6 +4682,8 @@
               nameplateOn: line.nameplateOn,
               fontSize: line.fontSize,
               textColor: line.textColor,
+              activeBackgroundId: line.activeBackgroundId,
+              sceneColorMode: line.sceneColorMode,
               chars: line.chars.map((s) => ({
                 charId: s.charId,
                 activeExpr: s.activeExpr,
@@ -4180,6 +4709,16 @@
               choice3Color: line.choice3Color,
             }
       ),
+      // audio.srcはaddBgmFromFileの時点でFileReaderにより既にdata: URL化
+      // されているので、imageToDataURLのような再変換は不要でそのまま使える
+      bgmTracks: state.bgmTracks.map((t) => ({
+        id: t.id,
+        name: t.name,
+        volume: t.volume,
+        startLineId: t.startLineId,
+        endLineId: t.endLineId,
+        audio: t.audio.src,
+      })),
     };
   }
 
@@ -4223,6 +4762,7 @@
     renderCharEditor();
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList();
     renderAll();
   }
 
@@ -4343,6 +4883,7 @@
     // 必ず.textContentで書き込むため、ここでは型の防御的コアーションのみ
     // 行えばよい（innerHTMLへの直接埋め込みはしない前提）。
     const validCharIds = new Set(loadedCharacters.map((c) => c.id));
+    const validBgIds = new Set(loadedBackgrounds.map((b) => b.id));
     const rawScenario = Array.isArray(data.scenario) ? data.scenario : [];
     state.scenario = rawScenario.map((line) =>
       line && line.isStartingFade
@@ -4363,11 +4904,15 @@
             body: typeof line.body === "string" ? line.body : "",
             activeCharId: validCharIds.has(line.activeCharId) ? line.activeCharId : null,
             nameplateOn: typeof line.nameplateOn === "boolean" ? line.nameplateOn : true,
-            // この機能追加より前に保存された行にはfontSize/textColorが無い。
-            // その場合はundefinedのままにしておく——applyScenarioLine側が
-            // 数値/文字列でなければ現在の値を変えずに保つ仕組みになっている
-            fontSize: typeof line.fontSize === "number" ? line.fontSize : undefined,
-            textColor: typeof line.textColor === "string" ? line.textColor : undefined,
+            // この機能追加より前に保存された行にはfontSize/textColorが無いので、
+            // その場合はデフォルト値にする
+            fontSize: typeof line.fontSize === "number" ? line.fontSize : BODY_DEFAULT_FONT_SIZE,
+            textColor: typeof line.textColor === "string" ? line.textColor : "#ffffff",
+            // 背景は削除済み/この機能追加前で不明な場合、nullにしておく
+            // （applyScenarioLine側が「現在表示中の背景を保つ」フォールバック
+            // を持っているので、ここでnullにしても背景が消えたりはしない）
+            activeBackgroundId: validBgIds.has(line.activeBackgroundId) ? line.activeBackgroundId : null,
+            sceneColorMode: typeof line.sceneColorMode === "string" ? line.sceneColorMode : "none",
             chars: Array.isArray(line.chars)
               ? line.chars
                   .filter((s) => s && validCharIds.has(s.charId))
@@ -4453,6 +4998,29 @@
 
     nextBgId = 1 + state.backgrounds.reduce((m, b) => Math.max(m, b.id), 0);
     nextCharId = 1 + state.characters.reduce((m, c) => Math.max(m, c.id), 0);
+
+    // 差し替え前に、今読み込まれているBGMが鳴っていれば止めておく
+    state.bgmTracks.forEach((t) => t.audio.pause());
+    const validRealLineIds = new Set(getRealScenarioLines().map((l) => l.id));
+    const rawBgmTracks = Array.isArray(data.bgmTracks) ? data.bgmTracks : [];
+    state.bgmTracks = rawBgmTracks
+      .filter((t) => t && typeof t.audio === "string")
+      .map((t) => {
+        const audio = new Audio(t.audio);
+        audio.loop = true;
+        connectBgmTrackForRouting(audio);
+        return {
+          id: typeof t.id === "number" ? t.id : nextBgmId++,
+          name: t.name || "BGM",
+          audio,
+          volume: typeof t.volume === "number" ? Math.min(1, Math.max(0, t.volume)) : 1,
+          // 削除済み/この機能追加前で不明な行を指している場合はnullにしておく
+          // （resolveBgmRange側が「先頭/末尾」へのフォールバックを持っている）
+          startLineId: validRealLineIds.has(t.startLineId) ? t.startLineId : null,
+          endLineId: validRealLineIds.has(t.endLineId) ? t.endLineId : null,
+        };
+      });
+    nextBgmId = 1 + state.bgmTracks.reduce((m, t) => Math.max(m, t.id), 0);
 
     projectNameInput.value = data.projectName || "";
     syncUiFromState();
@@ -5171,7 +5739,7 @@
 
   // シナリオ再生中の退去エフェクトは、静止編集でのスクラブ用の等倍速より
   // テンポよく見えるよう、この倍率で再生する
-  const DEPARTURE_PLAYBACK_RATE = 1.8;
+  const DEPARTURE_PLAYBACK_RATE = 2.3;
 
   // 退去エフェクト再生行の状態。行に登場する退去ON済みキャラ全員の退去
   // 動画を実際にvideo.play()で再生させ、ブラウザ本来の滑らかな再生
@@ -5282,6 +5850,13 @@
       // 直前の画面をそのまま残し、その上に暗転をかぶせるだけ
       if (line.enabled) {
         beginEndingFade();
+        // 画面の暗転（ENDING_FADE_MS）に合わせて、鳴っていたBGMも一緒に
+        // フェードアウトさせる——真っ暗になった後も鳴り続けたり、
+        // 停止時にいきなり切れたりしないようにするため
+        if (playback.currentBgmTrack) {
+          fadeOutBgmAudio(playback.currentBgmTrack.audio, ENDING_FADE_MS);
+          playback.currentBgmTrack = null;
+        }
       } else {
         stopScenarioPlayback();
       }
@@ -5290,6 +5865,10 @@
     }
 
     applyScenarioLine(line);
+    // BGMの切り替えはシナリオ再生中の実際の行送りでのみ行う——導入演出中に
+    // 次の行を先読みしてapplyScenarioLineを呼ぶ箇所（isStartingFade分岐）
+    // では呼ばないため、暗転が開く前にBGMが鳴り出すことはない
+    updateBgmPlaybackForLine(line);
     // AUTOアイコンの既存の発光演出をそのまま流用し、自動進行中であることを示す
     state.autoActive = state.scenarioAdvanceMode === "auto";
     autoActiveToggle.checked = state.autoActive;
@@ -5350,7 +5929,31 @@
     if (playback.mediaRecorder && playback.mediaRecorder.state !== "inactive") {
       playback.mediaRecorder.stop(); // onstopでBlob化してダウンロードされる
     }
-    if (playback.stream) playback.stream.getTracks().forEach((t) => t.stop());
+    // 映像トラック（canvas.captureStream由来）だけ止める——音声トラックは
+    // bgmAudioDestの使い回しの共有トラックなので、ここで止めてしまうと
+    // 以後の録画セッションでずっとBGMが入らなくなる（stream合成部参照）
+    if (playback.stream) playback.stream.getVideoTracks().forEach((t) => t.stop());
+    // 終了演出（beginEndingFade）を経由した自然終了では、その時点で既に
+    // フェードアウト済み・currentBgmTrackもnullになっている。ここに来る時点
+    // でまだ何か鳴っている場合は、終了演出を挟まない即時終了（「中止」
+    // ボタン、終了演出が無効なシナリオの自然終了）なので、ここでフェード
+    // アウトさせる（録画停止と同時に呼ぶため、録画自体には収まらないが、
+    // 少なくともブラウザ上でいきなり切れて聞こえることは無くなる）
+    if (playback.currentBgmTrack) {
+      fadeOutBgmAudio(playback.currentBgmTrack.audio, BGM_TRANSITION_FADE_MS);
+      playback.currentBgmTrack = null;
+    }
+    // 再生中に出したタップエフェクトが残ったまま（通常編集に戻ってから
+    // 古い1フレームが描かれ続ける等）にならないよう、後始末する
+    tapEffects.forEach(({ video }) => video.pause());
+    tapEffects = [];
+    // フェードの途中で再生が終わった場合、通常編集に戻った時に中途半端な
+    // 不透明度のまま固まって見えないよう、進行中のフェードを打ち切る
+    // （c.opacity/c.visibleは既にそれぞれの行の目標値になっているので、
+    // アニメの起点だけ消せば次の描画から即座にその値で表示される）
+    state.characters.forEach((c) => {
+      c._opacityAnimStartTime = null;
+    });
     if (gifCapture) {
       // GIFの生成・ダウンロードは非同期（数秒かかりうる）——再生セッション
       // 自体の後始末はここで先に終わらせ、完了は待たない
@@ -5396,6 +5999,12 @@
     let mediaRecorder = null;
     gifCapture = null;
 
+    // 再生開始ボタンのクリック（ユーザー操作）の延長で呼ばれるここが、
+    // ブラウザの自動再生制限に引っかからずAudioContextを再開できる
+    // 最後のタイミング——BGM再生（updateBgmPlaybackForLine）はこの後
+    // 非同期に始まるため、先に済ませておく
+    if (bgmAudioCtx && bgmAudioCtx.state === "suspended") bgmAudioCtx.resume();
+
     if (mode === "record" || mode === "gif") {
       // 録画・GIFキャプチャ専用のオフスクリーンcanvasにdrawSceneだけを
       // 毎フレーム描画する——drawEditorOverlay（選択枠/ハンドル）は絶対に
@@ -5411,6 +6020,16 @@
       mimeType = VIDEO_MIME_CANDIDATES.find((t) => MediaRecorder.isTypeSupported(t)) || "";
       try {
         stream = offscreenCanvas.captureStream(30);
+        // BGMの音声トラックを合成する——bgmAudioDestは全セッション共通の
+        // 単一のノードで、そのときどきに再生中のBGM（updateBgmPlaybackForLine
+        // 参照）の音声がそのまま流れ込んでくる。この音声トラック自体は
+        // ここで新規生成したものではなく使い回しなので、stopScenarioPlayback
+        // 側では絶対に.stop()しない（呼ぶと以後ずっとBGMが録画に入らなく
+        // なる）——video系トラックだけ止めるようにしてある
+        ensureBgmAudioRouting();
+        if (bgmAudioDest) {
+          bgmAudioDest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
+        }
         mediaRecorder = new MediaRecorder(stream, mimeType ? { mimeType } : {});
       } catch (err) {
         alert("録画の開始に失敗しました。");
@@ -5459,6 +6078,7 @@
       prevAutoActive: state.autoActive,
       prevSelectedId: state.selectedId,
       pendingAutoAdvance: null,
+      currentBgmTrack: null,
     };
 
     state.selectedId = null;
@@ -5578,7 +6198,7 @@
   function resolveScenarioStartIndex() {
     const n = state.scenarioStartLineNumber;
     if (!n || n <= 0) return 0;
-    const realLines = state.scenario.filter((l) => !l.isStartingFade && !l.isEndingFade);
+    const realLines = getRealScenarioLines();
     if (realLines.length === 0) return 0;
     const target = realLines[Math.min(n, realLines.length) - 1];
     const idx = state.scenario.indexOf(target);
@@ -5661,6 +6281,7 @@
     renderCharEditor();
     renderScenarioList();
     renderScenarioEditor();
+    renderBgmList();
     renderAll();
     commitUndoCheckpoint(); // 起動直後の状態を最初のチェックポイントとして記録しておく（これが無いと1手戻した時に空になる）
   }

@@ -32,6 +32,7 @@ IMAGE_FILES = {
 
 VIDEO_FILES = {
     "departureVideo": "departure.mp4",
+    "tapVideo": "tap.mp4",
 }
 
 FONT_FILE = "GenEiLateMinN_v2.woff2"

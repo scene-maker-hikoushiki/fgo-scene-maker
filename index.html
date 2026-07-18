@@ -290,7 +290,7 @@
           </div>
         </summary>
         <button type="button" class="btn btn--primary" id="scenarioAddLineBtn">現在の画面を追加する</button>
-        <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、このボタンで1行として記録します。行に登場しないキャラクターは、その行では現在の表示状態のまま扱われます。</p>
+        <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、このボタンで1行として記録します。行を記録した後で追加したキャラクターは、その行では非表示として扱われます。</p>
 
         <ul class="charlist charlist--scenario" id="scenarioList"><!-- JS populates --></ul>
 
@@ -317,6 +317,21 @@
             <input type="number" class="field__input field__input--number-small" id="scenarioStartLineInput" value="0" min="0" step="1">
           </label>
         </div>
+      </details>
+
+      <!-- BGM（動画保存機能一式） -->
+      <details class="panel panel--video" id="bgmPanel" open>
+        <summary>
+          <div class="panel__title-row">
+            <h2 class="panel__title">BGM <span class="panel__badge panel__badge--video">動画</span> <span class="panel__count" id="bgmCount">0</span></h2>
+          </div>
+        </summary>
+        <label class="filebtn" id="bgmAddLabel">
+          <input type="file" id="bgmInput" accept="audio/*" hidden>
+          <span>BGMを追加</span>
+        </label>
+
+        <ul class="charlist" id="bgmList"><!-- JS populates --></ul>
       </details>
 
     </div>
@@ -407,6 +422,26 @@
     <span class="charlist__name"></span>
     <span class="charlist__active-dot" title="表示中の背景"></span>
     <button type="button" class="charlist__del" title="この背景を削除">×</button>
+  </li>
+</template>
+
+<!-- BGM list item template -->
+<template id="bgmItemTemplate">
+  <li class="charlist__item charlist__item--bgm" data-id="">
+    <span class="charlist__drag-handle" title="ドラッグで並び替え">⠿</span>
+    <span class="charlist__name"></span>
+    <button type="button" class="charlist__del" title="このBGMを削除">×</button>
+    <div class="bgm-range">
+      <select class="bgm-range__select" data-role="start"></select>
+      <span class="bgm-range__sep">〜</span>
+      <select class="bgm-range__select" data-role="end"></select>
+    </div>
+    <div class="bgm-volume">
+      <span class="bgm-volume__label">音量</span>
+      <input type="range" class="bgm-volume__range" min="0" max="100" value="100">
+      <span class="bgm-volume__value">100</span>
+    </div>
+    <p class="bgm-range__warning" hidden>他のBGMと範囲が重なっています</p>
   </li>
 </template>
 

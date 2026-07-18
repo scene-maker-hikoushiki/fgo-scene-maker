@@ -963,6 +963,71 @@ details.collapsible-sub[open] > summary::before {
   border-color: var(--line-cyan);
 }
 
+/* ---- BGM list ---- */
+/* 行クリックでの選択操作は無い（開始/終了はセレクトボックスで指定する）ため
+   cursor:defaultにし、セレクト行は常に折り返して2段目に表示する */
+.charlist__item--bgm {
+  cursor: default;
+  flex-wrap: wrap;
+}
+.charlist__item--bgm .charlist__name {
+  cursor: pointer; /* 選択状態を持たないので、名前クリックでの改名を常に受け付ける */
+}
+.bgm-range {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bgm-range__select {
+  flex: 1;
+  min-width: 0;
+  font-size: 11.5px;
+  color: var(--text-primary);
+  background: var(--bg-input);
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: 4px;
+  padding: 3px 4px;
+}
+.bgm-range__select:focus { border-color: var(--line-cyan); outline: none; }
+.bgm-range__sep {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+/* 他のBGMと範囲が重なっている間だけ出す警告——追加直後はデフォルトで
+   全区間になり既存のBGMと重なりがちなので、ここを見て手動で調整する */
+.charlist__item--bgm.has-overlap { border-color: var(--danger-dim); }
+.charlist__item--bgm .bgm-range__warning {
+  flex-basis: 100%;
+  margin: 2px 0 0;
+  font-size: 11px;
+  color: var(--danger);
+}
+.bgm-volume {
+  flex-basis: 100%;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.bgm-volume__label {
+  flex-shrink: 0;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+.bgm-volume__range {
+  flex: 1;
+  min-width: 0;
+  height: 16px !important; /* 通常のinput[type=range]より一回り細く、範囲セレクトの高さに揃える */
+}
+.bgm-volume__value {
+  flex-shrink: 0;
+  width: 2.4em;
+  text-align: right;
+  color: var(--text-faint);
+  font-size: 11px;
+}
+
 /* シナリオの先頭/末尾に自動挿入される「シナリオ開始」「シナリオ終了」
    （暗転）行。並び替え・削除ができないことが分かるよう、他の行と少し
    見た目を変えている（点線の枠＋ドラッグハンドル分の余白なし） */
