@@ -337,6 +337,9 @@
   const scenarioDelayField = document.getElementById("scenarioDelayField");
   const scenarioDelayInput = document.getElementById("scenarioDelayInput");
   const stageHint = document.getElementById("stageHint");
+  // 通常時（何も選択していない時）の操作ヒント文言。何か選択中は
+  // updateStageStatus()がこの代わりに選択状況を表示する。
+  const STAGE_HINT_DEFAULT_TEXT = "立ち絵をドラッグで移動できます。選択すると角のハンドルで拡大縮小できます。";
 
   // ---------------- コンソール幅リサイズ ----------------
   // ステージ/コンソールの境界をドラッグする、VSCodeのパネルのような仕組み。
@@ -611,6 +614,20 @@
     return state.characters.find((c) => c.id === id);
   }
 
+  // 選択（＝操作対象）を切り替える。話者名連動がONのときは、選択＝
+  // 「今喋っているキャラ」とみなし、z順序の最前面へ自動的に移動する
+  // ——手動でレイヤー最前面ボタンを押さなくても、キャラを選ぶだけで
+  // 前面に出て話者名にも反映されるようにするため（syncSpeakerFromFrontChar
+  // 経由）。連動OFFのときはz順序に手を出さない。
+  function setSelectedCharacter(id) {
+    state.selectedId = id;
+    if (id == null || !state.speakerLinkToChar) return;
+    const idx = state.characters.findIndex((c) => c.id === id);
+    if (idx === -1 || idx === state.characters.length - 1) return;
+    const [c] = state.characters.splice(idx, 1);
+    state.characters.push(c);
+  }
+
   // 「表示状態」ボタン（削除ボタンの隣）と透明度スライダーは別物——前者は
   // シーンへの登場/退場そのものを切り替えるON/OFF、後者はそのキャラが
   // 表示されている間のフェード具合を決める数値。どちらか一方でも満たさ
@@ -754,6 +771,8 @@
       body: state.body,
       activeCharId: front ? front.id : null,
       nameplateOn: state.nameplateOn,
+      fontSize: state.fontSize,
+      textColor: state.textColor,
       chars,
       showChoices: state.showChoices,
       choiceCount: state.choiceCount,
@@ -778,6 +797,35 @@
   // 特殊行にはchars自体が無いため、その場合は必ずfalseになる。
   function lineHasDeparture(line) {
     return !!(line && line.chars && line.chars.some((s) => s.departureEnabled));
+  }
+
+  // シナリオ一覧・ステータス表示の両方で使う「行の要約」を1箇所にまとめる
+  // ——退去エフェクト再生行・選択肢を表示している行は、話者/本文の代わりに
+  // それと分かる説明を返す（renderScenarioList参照）。isStartingFade/
+  // isEndingFadeの特殊行は呼び出し側であらかじめ弾いておくこと。
+  function summarizeScenarioLine(line) {
+    const isDeparture = lineHasDeparture(line);
+    const departingNames = isDeparture
+      ? line.chars
+          .filter((s) => s.departureEnabled)
+          .map((s) => {
+            const c = getCharacter(s.charId);
+            return (c && c.name) || "（削除済みキャラ）";
+          })
+      : [];
+    const title = isDeparture
+      ? departingNames.join("、")
+      : line.showChoices
+      ? "選択肢"
+      : line.nameplateOn === false
+      ? "表示なし"
+      : line.speaker || "（話者なし）";
+    const body = isDeparture
+      ? "退去演出"
+      : line.showChoices
+      ? line.choice1 || "（選択肢1未入力）"
+      : line.body || "（本文なし）";
+    return { title, body };
   }
 
   // 「シナリオ開始」の特殊行。他の行と同じくstate.scenario配列で管理する
@@ -862,6 +910,20 @@
       c.departureFadeEnd = snap.departureFadeEnd;
       c.departureHue = snap.departureHue;
     });
+    // line.charsの並び順＝キャプチャ時のz順序（buildScenarioLineFromLiveStateが
+    // state.charactersをそのままmapして作っているため）。行を適用する際に
+    // 表示順（重なり順）も一緒に復元する。行に存在しない現在のキャラ
+    // （行を作った後で追加されたキャラ等）は、元の相対順を保ったまま
+    // 末尾（＝最前面側）へ残す。
+    const orderedIds = line.chars.map((snap) => snap.charId);
+    state.characters.sort((a, b) => {
+      const ai = orderedIds.indexOf(a.id);
+      const bi = orderedIds.indexOf(b.id);
+      if (ai === -1 && bi === -1) return 0;
+      if (ai === -1) return 1;
+      if (bi === -1) return -1;
+      return ai - bi;
+    });
     if (state.speakerLinkToChar) {
       syncSpeakerFromFrontChar(); // resolveFrontIndex経由で今設定したactiveCharIdを尊重する
     } else {
@@ -873,6 +935,18 @@
 
     state.nameplateOn = line.nameplateOn !== false;
     nameplateToggle.checked = state.nameplateOn;
+
+    // 古い保存データ（この機能追加前に作られた行）にはfontSize/textColorが
+    // 無いため、その場合は現在の値を変えずに保つ
+    if (typeof line.fontSize === "number") {
+      state.fontSize = line.fontSize;
+      fontSizeInput.value = state.fontSize;
+      document.getElementById("fontSizeNumber").value = state.fontSize;
+    }
+    if (line.textColor) {
+      state.textColor = line.textColor;
+      textColorInput.value = state.textColor;
+    }
 
     state.showChoices = line.showChoices;
     choicesToggle.checked = state.showChoices;
@@ -1987,8 +2061,158 @@
     }
   }
 
+  // ---------------- 元に戻す/やり直し (Ctrl+Z / Ctrl+Y) ----------------
+  // 個々の操作ごとにコマンドを記録する方式ではなく、renderAll()が呼ばれる
+  // たびに「一定時間呼び出しが途切れたら1つのチェックポイントとして
+  // 記録する」方式にしている——ドラッグ中やスライダー操作中は毎フレーム
+  // renderAll()が呼ばれるため、そのままだと巻き戻り幅が細かすぎて
+  // 使い物にならない。renderAll()はほぼ全てのstate変更後に呼ばれている
+  // ため、これだけで大半の操作を横断的にカバーできる。
+  const UNDO_LIMIT = 50;
+  const UNDO_COMMIT_DELAY_MS = 500;
+  let undoStack = [];
+  let redoStack = [];
+  let undoCommitTimer = null;
+  let suppressUndoCommit = false; // undo/redoの適用自体を新規チェックポイントとして記録しないためのガード
+
+  // state.backgrounds/state.charactersに乗っているimg（と退去エフェクト用
+  // video）はDOM要素でありstructuredCloneできないため、いったん取り除いて
+  // クローンしてから、元のオブジェクトとクローン結果の両方へ同じ参照を
+  // 戻す——画像・動画データ自体は変化しないので参照を使い回して問題ない
+  // （毎回re-encodeするとundo/redoのたびに重くなってしまう）。
+  // digestは画像を含まないクローン直後のJSON文字列で、直前のチェック
+  // ポイントと内容が変わっていないかの比較にだけ使う（img参照を含む
+  // 状態はJSON化できない＝循環参照で例外になるため、必ずこの時点で作る）。
+  function cloneStateData(source) {
+    const bgImgs = source.backgrounds.map((b) => b.img);
+    const charImgs = source.characters.map((c) => c.img);
+    const charVariantImgs = source.characters.map((c) => c.variants.map((v) => v.img));
+    const charVideos = source.characters.map((c) => c._departureVideoEl || null);
+
+    source.backgrounds.forEach((b) => {
+      b.img = null;
+    });
+    source.characters.forEach((c) => {
+      c.img = null;
+      c.variants.forEach((v) => {
+        v.img = null;
+      });
+      delete c._departureVideoEl;
+    });
+
+    let cloned, digest;
+    try {
+      cloned = structuredClone(source);
+      digest = JSON.stringify(cloned);
+    } finally {
+      source.backgrounds.forEach((b, i) => {
+        b.img = bgImgs[i];
+      });
+      source.characters.forEach((c, i) => {
+        c.img = charImgs[i];
+        c.variants.forEach((v, j) => {
+          v.img = charVariantImgs[i][j];
+        });
+        if (charVideos[i]) c._departureVideoEl = charVideos[i];
+      });
+    }
+
+    cloned.backgrounds.forEach((b, i) => {
+      b.img = bgImgs[i];
+    });
+    cloned.characters.forEach((c, i) => {
+      c.img = charImgs[i];
+      c.variants.forEach((v, j) => {
+        v.img = charVariantImgs[i][j];
+      });
+      if (charVideos[i]) c._departureVideoEl = charVideos[i];
+    });
+
+    return { data: cloned, digest };
+  }
+
+  // 現在のstateを1チェックポイントとして積む。直前と内容が同じなら
+  // 積み直さない。シナリオ再生中・undo/redo適用中は記録しない
+  // （再生中は行のスナップショットが位置/拡縮を保持しないなど別物のため、
+  // 巻き戻り対象として意味を持たない）。
+  function commitUndoCheckpoint() {
+    if (suppressUndoCommit || playback) return;
+    const snapshot = cloneStateData(state);
+    const last = undoStack[undoStack.length - 1];
+    if (last && last.digest === snapshot.digest) return;
+    undoStack.push(snapshot);
+    if (undoStack.length > UNDO_LIMIT) undoStack.shift();
+    redoStack.length = 0; // 新しい変更が入った時点で、それより後のredo履歴は無効になる
+  }
+
+  function scheduleUndoCommit() {
+    if (undoCommitTimer) clearTimeout(undoCommitTimer);
+    undoCommitTimer = setTimeout(() => {
+      undoCommitTimer = null;
+      commitUndoCheckpoint();
+    }, UNDO_COMMIT_DELAY_MS);
+  }
+
+  // スタックに積んであるチェックポイントをstateへ適用する。スタック側の
+  // エントリとstateが同じオブジェクトを共有してしまわないよう、適用時にも
+  // 独立したクローンを作る。
+  function applyStateSnapshot(entry) {
+    const restored = cloneStateData(entry.data);
+    suppressUndoCommit = true;
+    try {
+      Object.assign(state, restored.data);
+      // 選択中扱いのidが、復元後の一覧にもう存在しない場合は選択解除する
+      if (!state.characters.some((c) => c.id === state.selectedId)) state.selectedId = null;
+      if (!state.backgrounds.some((b) => b.id === state.activeBackgroundId)) state.activeBackgroundId = null;
+      if (!state.scenario.some((l) => l.id === state.scenarioSelectedId)) state.scenarioSelectedId = null;
+      syncUiFromState();
+    } finally {
+      suppressUndoCommit = false;
+    }
+  }
+
+  function performUndo() {
+    if (playback || undoStack.length <= 1) return; // 末尾＝現在なので、それより前が無ければ戻れない
+    const current = undoStack.pop();
+    redoStack.push(current);
+    applyStateSnapshot(undoStack[undoStack.length - 1]);
+  }
+
+  function performRedo() {
+    if (playback || redoStack.length === 0) return;
+    const next = redoStack.pop();
+    undoStack.push(next);
+    applyStateSnapshot(next);
+  }
+
+  // プレビュー下の操作ヒント表示を差し替える——何か選択中/操作中の間は
+  // 通常のヒント文言の代わりに「立ち絵：○○　/　シーンN: ○○」を表示し、
+  // 何も選択していなければ通常のヒントに戻す。renderAll()から毎回呼んで
+  // いるが、テキストを差し替えるだけの軽い処理なのでデバウンスは不要。
+  function updateStageStatus() {
+    const parts = [];
+    if (state.selectedId != null) {
+      const c = getCharacter(state.selectedId);
+      if (c) parts.push("立ち絵：" + (c.name || "キャラクター"));
+    }
+    const line = state.scenario.find((l) => l.id === state.scenarioSelectedId);
+    if (line && !line.isStartingFade && !line.isEndingFade) {
+      let realLineNumber = 0;
+      for (const l of state.scenario) {
+        if (l.isStartingFade || l.isEndingFade) continue;
+        realLineNumber++;
+        if (l.id === line.id) break;
+      }
+      parts.push("シーン" + realLineNumber + ": " + summarizeScenarioLine(line).title);
+    }
+    stageHint.classList.toggle("is-status", parts.length > 0);
+    stageHint.textContent = parts.length > 0 ? parts.join("　/　") : STAGE_HINT_DEFAULT_TEXT;
+  }
+
   let renderQueued = false;
   function renderAll() {
+    scheduleUndoCommit();
+    updateStageStatus();
     if (renderQueued) return;
     renderQueued = true;
     requestAnimationFrame(() => {
@@ -2170,14 +2394,14 @@
     }
 
     if (hit) {
-      state.selectedId = hit.id;
+      setSelectedCharacter(hit.id);
       dragMode = "move";
       dragOffsetX = pos.x - getEffectiveX(hit);
       dragOffsetY = pos.y - getEffectiveY(hit);
       canvas.setPointerCapture(evt.pointerId);
       canvas.classList.add("is-dragging");
     } else {
-      state.selectedId = null;
+      setSelectedCharacter(null);
       // 掴めるものが何もない — パンの余地がある背景があれば
       // （ズームしている、またはアスペクト比に余裕がある場合）、
       // 単に選択解除するのではなくこのドラッグで背景を動かせるようにする。
@@ -2197,6 +2421,7 @@
     }
     renderCharList();
     renderCharEditor();
+    syncSpeakerFromFrontChar();
     renderAll();
   });
 
@@ -2402,9 +2627,10 @@
       if (i === frontIndex) node.classList.add("is-active");
       if (!isCharacterVisible(c)) node.classList.add("is-hidden");
       node.addEventListener("click", () => {
-        state.selectedId = c.id;
+        setSelectedCharacter(c.id);
         renderCharList();
         renderCharEditor();
+        syncSpeakerFromFrontChar();
         renderAll();
       });
       const visBtn = node.querySelector(".charlist__visibility-btn");
@@ -3431,35 +3657,9 @@
       realLineNumber++;
       const node = scenarioItemTemplate.content.firstElementChild.cloneNode(true);
       node.dataset.id = String(line.id);
-      // 退去エフェクト再生行・選択肢を表示している行は、話者/本文の代わりに
-      // それと分かるプレビューを出す（退去エフェクト再生行ではウインドウ
-      // 自体が非表示になり、選択肢を表示している行は選択肢が前面に出る
-      // ため、一覧上もそちらを優先して表示する）。退去エフェクト再生行は
-      // 上段に対象キャラ名を列挙し、下段に「退去演出」と説明する。
-      const isDeparture = lineHasDeparture(line);
-      const departingNames = isDeparture
-        ? line.chars
-            .filter((s) => s.departureEnabled)
-            .map((s) => {
-              const c = getCharacter(s.charId);
-              return (c && c.name) || "（削除済みキャラ）";
-            })
-        : [];
-      node.querySelector(".charlist__scenario-speaker").textContent =
-        realLineNumber +
-        ". " +
-        (isDeparture
-          ? departingNames.join("、")
-          : line.showChoices
-          ? "選択肢"
-          : line.nameplateOn === false
-          ? "表示なし"
-          : line.speaker || "（話者なし）");
-      node.querySelector(".charlist__scenario-body").textContent = isDeparture
-        ? "退去演出"
-        : line.showChoices
-        ? line.choice1 || "（選択肢1未入力）"
-        : line.body || "（本文なし）";
+      const summary = summarizeScenarioLine(line);
+      node.querySelector(".charlist__scenario-speaker").textContent = realLineNumber + ". " + summary.title;
+      node.querySelector(".charlist__scenario-body").textContent = summary.body;
       if (line.id === state.scenarioSelectedId) node.classList.add("is-selected");
       node.addEventListener("click", () => {
         state.scenarioSelectedId = line.id;
@@ -3953,6 +4153,8 @@
               body: line.body,
               activeCharId: line.activeCharId,
               nameplateOn: line.nameplateOn,
+              fontSize: line.fontSize,
+              textColor: line.textColor,
               chars: line.chars.map((s) => ({
                 charId: s.charId,
                 activeExpr: s.activeExpr,
@@ -3981,12 +4183,53 @@
     };
   }
 
+  // トグル類は全て、自身の"change"イベントでstateに一方向にしか反映
+  // しない素のDOMコントロール上にあるため、state自体が（プロジェクト
+  // 読み込み・undo/redoなどで）まとめて置き換わった後は、ここで逆方向に
+  // 全コントロールへ反映してやらないと、復元したstateと知らないうちに
+  // ズレてしまう。呼び出し元でstate.xxxが既にセット済みであることが前提。
+  function syncUiFromState() {
+    dimToggle.checked = state.dimInactive;
+    applySceneColorMode(state.sceneColorMode);
+    nameplateToggle.checked = state.nameplateOn;
+    windowToggle.checked = state.showWindow;
+    buttonsToggle.checked = state.showButtons;
+    showSkipToggle.checked = state.showSkip;
+    showLogToggle.checked = state.showLog;
+    showAutoToggle.checked = state.showAuto;
+    autoActiveToggle.checked = state.autoActive;
+    showNextToggle.checked = state.showNext;
+    choicesToggle.checked = state.showChoices;
+    applyChoiceCount(state.choiceCount);
+    choice1Input.value = state.choice1;
+    choice2Input.value = state.choice2;
+    choice3Input.value = state.choice3;
+    choice1ColorInput.value = state.choice1Color;
+    choice2ColorInput.value = state.choice2Color;
+    choice3ColorInput.value = state.choice3Color;
+    speakerLinkToggle.checked = state.speakerLinkToChar;
+    speakerInput.value = state.speaker;
+    speakerInput.disabled = state.speakerLinkToChar;
+    bodyInput.value = state.body;
+    fontSizeInput.value = state.fontSize;
+    document.getElementById("fontSizeNumber").value = state.fontSize;
+    textColorInput.value = state.textColor;
+    setScenarioAdvanceMode(state.scenarioAdvanceMode);
+    scenarioDelayInput.value = state.scenarioAutoDelaySec;
+
+    renderBgList();
+    renderBgEditor();
+    renderCharList();
+    renderCharEditor();
+    renderScenarioList();
+    renderScenarioEditor();
+    renderAll();
+  }
+
   // パースしたプロジェクトファイルからstate.backgrounds/state.charactersを
   // 再構築し、埋め込まれたbase64画像をそれぞれ実際の<img>として読み込み
   // 直す（loadImageはdata: URLも含めどんなsrcでも受け付ける）。それ以外の
-  // トップレベルのトグル類は全て、自身の"change"イベントでstateに一方向に
-  // しか反映しない素のDOMコントロール上にあるため、ここでも逆方向に
-  // 反映してやらないと、復元したstateと知らないうちにズレてしまう。
+  // トップレベルのトグル類はsyncUiFromStateでまとめて反映する。
   async function loadProjectData(data) {
     if (!data || typeof data !== "object" || !Array.isArray(data.backgrounds) || !Array.isArray(data.characters)) {
       throw new Error("不正なプロジェクトファイルです。");
@@ -4120,6 +4363,11 @@
             body: typeof line.body === "string" ? line.body : "",
             activeCharId: validCharIds.has(line.activeCharId) ? line.activeCharId : null,
             nameplateOn: typeof line.nameplateOn === "boolean" ? line.nameplateOn : true,
+            // この機能追加より前に保存された行にはfontSize/textColorが無い。
+            // その場合はundefinedのままにしておく——applyScenarioLine側が
+            // 数値/文字列でなければ現在の値を変えずに保つ仕組みになっている
+            fontSize: typeof line.fontSize === "number" ? line.fontSize : undefined,
+            textColor: typeof line.textColor === "string" ? line.textColor : undefined,
             chars: Array.isArray(line.chars)
               ? line.chars
                   .filter((s) => s && validCharIds.has(s.charId))
@@ -4206,42 +4454,8 @@
     nextBgId = 1 + state.backgrounds.reduce((m, b) => Math.max(m, b.id), 0);
     nextCharId = 1 + state.characters.reduce((m, c) => Math.max(m, c.id), 0);
 
-    dimToggle.checked = state.dimInactive;
-    applySceneColorMode(state.sceneColorMode);
-    nameplateToggle.checked = state.nameplateOn;
-    windowToggle.checked = state.showWindow;
-    buttonsToggle.checked = state.showButtons;
-    showSkipToggle.checked = state.showSkip;
-    showLogToggle.checked = state.showLog;
-    showAutoToggle.checked = state.showAuto;
-    autoActiveToggle.checked = state.autoActive;
-    showNextToggle.checked = state.showNext;
-    choicesToggle.checked = state.showChoices;
-    applyChoiceCount(state.choiceCount);
-    choice1Input.value = state.choice1;
-    choice2Input.value = state.choice2;
-    choice3Input.value = state.choice3;
-    choice1ColorInput.value = state.choice1Color;
-    choice2ColorInput.value = state.choice2Color;
-    choice3ColorInput.value = state.choice3Color;
-    speakerLinkToggle.checked = state.speakerLinkToChar;
-    speakerInput.value = state.speaker;
-    speakerInput.disabled = state.speakerLinkToChar;
-    bodyInput.value = state.body;
-    fontSizeInput.value = state.fontSize;
-    document.getElementById("fontSizeNumber").value = state.fontSize;
-    textColorInput.value = state.textColor;
     projectNameInput.value = data.projectName || "";
-    setScenarioAdvanceMode(state.scenarioAdvanceMode);
-    scenarioDelayInput.value = state.scenarioAutoDelaySec;
-
-    renderBgList();
-    renderBgEditor();
-    renderCharList();
-    renderCharEditor();
-    renderScenarioList();
-    renderScenarioEditor();
-    renderAll();
+    syncUiFromState();
   }
 
   projectSaveBtn.addEventListener("click", () => {
@@ -4264,11 +4478,10 @@
     }
   });
 
-  projectOpenInput.addEventListener("change", async (e) => {
-    const file = e.target.files[0];
-    e.target.value = "";
+  // ファイル選択（input）・ドラッグ&ドロップの両方から使う共通の
+  // プロジェクト読み込み処理。
+  async function loadProjectFile(file) {
     if (!file) return;
-
     const hasContent = state.characters.length > 0 || state.backgrounds.length > 0;
     if (hasContent && !confirm("現在の内容は失われます。プロジェクトを開きますか？")) return;
 
@@ -4285,6 +4498,66 @@
       alert("プロジェクトの読み込みに失敗しました。ファイル形式をご確認ください。");
       console.error(err);
     }
+  }
+
+  projectOpenInput.addEventListener("change", async (e) => {
+    const file = e.target.files[0];
+    e.target.value = "";
+    await loadProjectFile(file);
+  });
+
+  // ---------------- ドラッグ&ドロップでのファイル追加 ----------------
+  // 背景パネルには画像を背景として、キャラクターパネルには画像を
+  // キャラクターとして、保存欄（フッター）にはプロジェクトファイルを
+  // ドラッグ&ドロップで追加できるようにする。
+  function isFileDrag(evt) {
+    return !!(evt.dataTransfer && Array.from(evt.dataTransfer.types || []).includes("Files"));
+  }
+
+  // dragenter/dragleaveは子要素をまたぐたびにも発火するため、深さを
+  // カウントして0に戻った時だけハイライトを消す（子要素へ出入りする
+  // たびにちらつくのを防ぐ）。
+  function wireFileDropZone(el, { accept, onFiles }) {
+    if (!el) return;
+    let depth = 0;
+    el.addEventListener("dragenter", (evt) => {
+      if (!isFileDrag(evt)) return;
+      evt.preventDefault();
+      depth++;
+      el.classList.add("is-drag-over");
+    });
+    el.addEventListener("dragover", (evt) => {
+      if (!isFileDrag(evt)) return;
+      evt.preventDefault(); // ドロップを許可するために必須
+    });
+    el.addEventListener("dragleave", () => {
+      depth = Math.max(0, depth - 1);
+      if (depth === 0) el.classList.remove("is-drag-over");
+    });
+    el.addEventListener("drop", (evt) => {
+      if (!isFileDrag(evt)) return;
+      evt.preventDefault();
+      depth = 0;
+      el.classList.remove("is-drag-over");
+      const files = Array.from(evt.dataTransfer.files || []).filter(accept);
+      if (files.length) onFiles(files);
+    });
+  }
+
+  wireFileDropZone(document.getElementById("bgPanel"), {
+    accept: (f) => f.type.startsWith("image/"),
+    onFiles: (files) => files.forEach((f) => addBackgroundFromFile(f)),
+  });
+  wireFileDropZone(document.getElementById("charPanel"), {
+    accept: (f) => f.type.startsWith("image/"),
+    onFiles: (files) => files.forEach((f) => addCharacterFromFile(f)),
+  });
+  wireFileDropZone(consoleFooterDetails, {
+    accept: (f) => /\.json$/i.test(f.name), // .fgoscene.jsonも.jsonで終わるので拾える
+    onFiles: (files) => {
+      footerTabProjectBtn.click(); // プロジェクトタブに切り替えてから読み込む
+      loadProjectFile(files[0]); // 複数落とされても先頭の1つだけを読み込む
+    },
   });
 
   scenarioAddLineBtn.addEventListener("click", () => {
@@ -5380,8 +5653,7 @@
       return;
     }
     exportBtn.disabled = false;
-    stageHint.textContent =
-      "立ち絵をドラッグで移動できます。選択すると角のハンドルで拡大縮小できます。";
+    stageHint.textContent = STAGE_HINT_DEFAULT_TEXT;
     speakerInput.disabled = state.speakerLinkToChar;
     renderBgList();
     renderBgEditor();
@@ -5390,7 +5662,28 @@
     renderScenarioList();
     renderScenarioEditor();
     renderAll();
+    commitUndoCheckpoint(); // 起動直後の状態を最初のチェックポイントとして記録しておく（これが無いと1手戻した時に空になる）
   }
+
+  window.addEventListener("keydown", (e) => {
+    if (!(e.ctrlKey || e.metaKey)) return;
+    const key = e.key.toLowerCase();
+    const isUndo = key === "z" && !e.shiftKey;
+    const isRedo = key === "y" || (key === "z" && e.shiftKey);
+    if (!isUndo && !isRedo) return;
+
+    const target = document.activeElement;
+    const isTextEditing =
+      target &&
+      (target.tagName === "INPUT" ||
+        target.tagName === "TEXTAREA" ||
+        target.isContentEditable);
+    if (isTextEditing) return; // テキスト入力中はブラウザ標準のundo/redoに任せる
+
+    e.preventDefault();
+    if (isUndo) performUndo();
+    else performRedo();
+  });
 
   boot();
 })();

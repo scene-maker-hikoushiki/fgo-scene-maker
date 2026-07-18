@@ -193,6 +193,14 @@ body::before {
   font-size: 12.5px;
   color: var(--text-muted);
   letter-spacing: 0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* 何か選択中/操作中のときは、通常の操作ヒントの代わりに
+   「立ち絵：○○　/　シーンN: ○○」を表示する（updateStageStatus参照） */
+.stage__hint.is-status {
+  color: var(--line-cyan);
 }
 
 /* ================= RESIZER (drag handle between stage/console) ================= */
@@ -514,6 +522,14 @@ body.is-scenario-playing .console__body {
   border-bottom: 1px solid var(--line-cyan-dimmer);
 }
 .panel:last-child { border-bottom: none; }
+
+/* ファイルをドラッグ中に該当パネル/保存欄の上に来たときの見た目 */
+.panel.is-drag-over,
+.console__footer.is-drag-over {
+  background: var(--line-cyan-dimmer);
+  box-shadow: inset 0 0 0 2px var(--line-cyan);
+  border-radius: var(--radius-s);
+}
 
 /* シナリオ（動画保存機能一式）パネルだけ、他の静止画向けパネルと
    ひと目で区別できるよう左に色帯を付ける。console__bodyの左右padding
