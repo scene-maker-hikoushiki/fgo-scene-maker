@@ -52,6 +52,7 @@
 
     <div class="console__scroll">
     <div class="console__body">
+    <div class="console__col console__col--left">
 
       <!-- 背景 -->
       <details class="panel" open>
@@ -78,7 +79,7 @@
       <details class="panel" open>
         <summary>
           <div class="panel__title-row">
-            <h2 class="panel__title">キャラクター <span class="panel__count" id="charCount">0/5</span></h2>
+            <h2 class="panel__title">キャラクター <span class="panel__count" id="charCount">0/15</span></h2>
           </div>
         </summary>
         <label class="filebtn" id="charAddLabel">
@@ -278,14 +279,17 @@
         </label>
       </details>
 
+    </div>
+    <div class="console__col console__col--right">
+
       <!-- シナリオ（動画保存機能一式） -->
-      <details class="panel" open>
+      <details class="panel panel--video" open>
         <summary>
           <div class="panel__title-row">
-            <h2 class="panel__title">シナリオ <span class="panel__count" id="scenarioCount">0</span></h2>
+            <h2 class="panel__title">シナリオ <span class="panel__badge panel__badge--video">動画</span> <span class="panel__count" id="scenarioCount">0</span></h2>
           </div>
         </summary>
-        <button type="button" class="btn btn--primary" id="scenarioAddLineBtn">現在の状態を行として追加</button>
+        <button type="button" class="btn btn--primary" id="scenarioAddLineBtn">現在の画面を追加する</button>
         <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、このボタンで1行として記録します。行に登場しないキャラクターは、その行では現在の表示状態のまま扱われます。</p>
 
         <ul class="charlist charlist--scenario" id="scenarioList"><!-- JS populates --></ul>
@@ -293,10 +297,29 @@
         <div class="panel__divider"></div>
 
         <div id="scenarioEditor" class="char-editor char-editor--empty">
-          <p class="char-editor__empty-msg">行を選択すると、ここで進行方法を調整できます</p>
+          <p class="char-editor__empty-msg">行を選択すると、ここで並び替えや削除ができます</p>
+        </div>
+
+        <div class="panel__divider"></div>
+
+        <span class="char-editor__label">進行方式（シナリオ全体で共通）</span>
+        <div class="footer-tabs" id="scenarioAdvanceModeTabs">
+          <button type="button" class="footer-tab is-active" data-mode="auto">AUTO</button>
+          <button type="button" class="footer-tab" data-mode="manual">手動</button>
+        </div>
+        <div style="display: flex; gap: 8px; align-items: flex-end;">
+          <label class="field" id="scenarioDelayField" style="flex: 1;">
+            <span class="field__label">表示変更速度（秒）</span>
+            <input type="number" class="field__input field__input--number-small" id="scenarioDelayInput" value="3" min="0.1" step="0.1">
+          </label>
+          <label class="field" style="flex: 1;">
+            <span class="field__label">再生開始位置（0=最初）</span>
+            <input type="number" class="field__input field__input--number-small" id="scenarioStartLineInput" value="0" min="0" step="1">
+          </label>
         </div>
       </details>
 
+    </div>
     </div>
 
     <p class="console__terms">
@@ -309,7 +332,10 @@
 
     </div>
 
-    <div class="console__footer">
+    <details class="console__footer" id="consoleFooterDetails" open>
+      <summary class="console__footer-summary">
+        <span class="console__footer-title">保存</span>
+      </summary>
       <div class="footer-tabs" id="footerTabs">
         <button type="button" class="footer-tab is-active" id="footerTabExportBtn" data-tab="export">画像保存</button>
         <button type="button" class="footer-tab" id="footerTabProjectBtn" data-tab="project">プロジェクト</button>
@@ -344,18 +370,28 @@
             <span class="field__label">ファイル名</span>
             <input type="text" id="videoNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
           </label>
-          <button class="btn btn--primary" id="scenarioPlayBtn">再生開始（録画）</button>
+          <div class="btn-row">
+            <button type="button" class="btn btn--sm" id="scenarioPreviewBtn">プレビュー再生</button>
+            <div class="video-save-menu-wrap">
+              <button type="button" class="btn btn--primary" id="scenarioPlayBtn" style="width:100%;">再生開始 ▾</button>
+              <div class="video-format-menu" id="videoFormatMenu">
+                <button type="button" class="video-format-menu__item" data-format="webm">WebM動画として保存</button>
+                <button type="button" class="video-format-menu__item" data-format="gif">GIF画像として保存</button>
+              </div>
+            </div>
+          </div>
           <button type="button" class="btn btn--danger btn--sm" id="scenarioCancelBtn" style="width:100%; margin-top:8px;" hidden>録画を中止</button>
-          <p class="field__hint">再生開始と同時に録画も始まり、最後の行が終わると自動でWebMファイルがダウンロードされます。録画中はこのタブを閉じたり最小化したりしないでください。</p>
+          <p class="field__hint" id="videoFormatHint"></p>
         </div>
       </div>
-    </div>
+    </details>
   </aside>
 </div>
 
 <!-- char list item template -->
 <template id="charItemTemplate">
   <li class="charlist__item" data-id="">
+    <span class="charlist__drag-handle" title="ドラッグで重なり順を変更">⠿</span>
     <span class="charlist__thumb"><img alt=""></span>
     <span class="charlist__name"></span>
     <span class="charlist__active-dot" title="最前面（暗くならない）"></span>
@@ -382,8 +418,19 @@
       <span class="charlist__scenario-speaker"></span>
       <span class="charlist__scenario-body"></span>
     </span>
-    <span class="charlist__scenario-mode"></span>
+    <button type="button" class="charlist__update-btn" title="現在の状態でこの行を更新">⟳</button>
     <button type="button" class="charlist__del" title="この行を削除">×</button>
+  </li>
+</template>
+
+<!-- scenario special (starting/ending fade) item template — always pinned to head/tail, not draggable/deletable. speaker/body text is set by script.js -->
+<template id="scenarioSpecialItemTemplate">
+  <li class="charlist__item charlist__item--scenario charlist__item--scenario-special" data-id="">
+    <span class="charlist__scenario-preview">
+      <span class="charlist__scenario-speaker"></span>
+      <span class="charlist__scenario-body"></span>
+    </span>
+    <button type="button" class="charlist__visibility-btn" title="有効/無効を切り替え">👁</button>
   </li>
 </template>
 

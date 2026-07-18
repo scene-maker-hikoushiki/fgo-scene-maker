@@ -23,6 +23,11 @@
   --danger: #ff6b76;
   --danger-dim: rgba(255, 107, 118, 0.15);
 
+  /* シナリオ/動画保存など、動画関連の機能だけを他と見分けやすくする
+     ためのアクセント（既存のcyan/goldとは別系統の色にしている） */
+  --accent-video: #ff6ad5;
+  --accent-video-dim: rgba(255, 106, 213, 0.16);
+
   --radius-s: 6px;
   --radius-m: 10px;
   --radius-l: 16px;
@@ -263,17 +268,115 @@ body.is-resizing-console {
 .console__scroll {
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
-.console__scroll::-webkit-scrollbar { width: 8px; }
-.console__scroll::-webkit-scrollbar-thumb {
-  background: var(--bg-panel-raised);
+
+/* UIの色合いに馴染む、控えめなスクロールバー。トラック（掴む部分以外）は
+   透明にして地味にし、つまみ（実際に掴んで動かす部分）だけ薄いcyanで
+   見えるようにする——ホバー時だけ少し明るくして掴める場所だと分かる
+   ようにしている。.console__scrollに限らず、2列時に個別スクロールする
+   .console__col--left/--right・.console__termsにも同じ見た目を使う。 */
+.console__scroll,
+.console__col--left,
+.console__col--right,
+.console__terms {
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: var(--line-cyan-dimmer) transparent; /* Firefox: thumb track */
+}
+.console__scroll::-webkit-scrollbar,
+.console__col--left::-webkit-scrollbar,
+.console__col--right::-webkit-scrollbar,
+.console__terms::-webkit-scrollbar {
+  width: 6px;
+}
+.console__scroll::-webkit-scrollbar-track,
+.console__col--left::-webkit-scrollbar-track,
+.console__col--right::-webkit-scrollbar-track,
+.console__terms::-webkit-scrollbar-track {
+  background: transparent;
+}
+.console__scroll::-webkit-scrollbar-thumb,
+.console__col--left::-webkit-scrollbar-thumb,
+.console__col--right::-webkit-scrollbar-thumb,
+.console__terms::-webkit-scrollbar-thumb {
+  background: var(--line-cyan-dimmer);
   border-radius: 4px;
+}
+.console__scroll::-webkit-scrollbar-thumb:hover,
+.console__col--left::-webkit-scrollbar-thumb:hover,
+.console__col--right::-webkit-scrollbar-thumb:hover,
+.console__terms::-webkit-scrollbar-thumb:hover {
+  background: var(--line-cyan-dim);
 }
 
 .console__body {
   padding: 10px 22px 18px;
+  overflow-x: hidden;
+}
+
+/* デフォルト（1列）では単なる縦積みの入れ物——.console__col--leftの
+   全パネル、続けて.console__col--right（シナリオ＝動画関連）の順に
+   ブロックとして積み上がるだけで、今までの見た目と変わらない。
+   container-type/nameは.console__bodyではなくここ（左列）に付けている
+   ——2列化した状態で.console__bodyに付けたままだと、表情差分シートの
+   レイアウト切り替え（@container console、下記）が「2列化前の全幅」を
+   基準に判定されてしまい、実際に表示に使える左列の幅より広いと誤認して
+   画像を横に並べるレイアウトを強行し、範囲指定UIがつぶれていた。 */
+.console__col--left {
+  min-width: 0;
+  overflow-x: hidden;
   container-type: inline-size;
   container-name: console;
+}
+.console__col--right {
+  min-width: 0;
+  overflow-x: hidden;
+}
+
+/* コンソール幅を広げてプレビューと半々に近づくくらいになったら、
+   動画関連（シナリオパネル）を右列に分けた2列レイアウトにする。
+   @containerクエリで試したが実際には反映されなかったため、
+   #consoleResizerのドラッグ中にJS側でbody.console-wideを直接
+   切り替える確実な方式にしている（initConsoleResizer参照、しきい値も
+   そちらのCONSOLE_WIDE_THRESHOLD参照）。
+   スマホ幅（横方向のリサイズ自体が存在しない）ではドラッグ後に幅を
+   広げたまま画面を狭めた場合でも2列化が誤って効かないよう、
+   デスクトップ幅のメディアクエリの中に限定している。 */
+@media (min-width: 861px) {
+  /* 2列それぞれを独立してスクロールさせる——.console__scroll自体は
+     もう自分でスクロールせず、下へ高さを伝えるだけの縦積みflexにし、
+     実際のスクロールは各列とconsole__termsにそれぞれ持たせる
+     （min-height:0が無いとflexアイテムは中身の分だけ伸びてしまい、
+     はみ出してスクロールが起きない）。 */
+  body.console-wide .console__scroll {
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+  }
+  body.console-wide .console__body {
+    display: flex;
+    align-items: stretch;
+    gap: 20px;
+    flex: 1;
+    min-height: 0;
+  }
+  body.console-wide .console__col--left,
+  body.console-wide .console__col--right {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+  }
+}
+
+/* 2列時、利用規約(.console__terms)は独立した帯として別枠を取らず、
+   左列の最後尾に含めてスクロールと一緒に流れるようにする（別枠だと
+   場所を取るため）。実際の要素の移動はJS側（updateTermsPlacement）が
+   行い、ここでは移動先（.console__col--left内）でのpaddingだけ調整する
+   ——.console__bodyの左右padding(22px)を既に持っているので、.console__terms
+   自身の左右paddingは重複しないよう打ち消す。 */
+.console__col--left > .console__terms {
+  padding-left: 0;
+  padding-right: 0;
 }
 
 /* シナリオ再生（＝録画）中は、位置/拡縮を保持しない行のスナップショット
@@ -290,10 +393,60 @@ body.is-scenario-playing .console__body {
   padding: 16px 22px 20px;
   border-top: 1px solid var(--line-cyan-dim);
 }
+/* .console__footerも他のパネルと同じく<details>にして畳めるようにし、
+   使わない時は保存欄の分だけ画面を狭くできるようにしている
+   （.panel > summaryと同じ見た目のシェブロンにしている） */
+.console__footer > summary {
+  cursor: pointer;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  border-radius: var(--radius-s);
+  margin: -8px -10px 12px;
+  padding: 8px 10px;
+  transition: background .15s ease;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.console__footer[open] > summary {
+  margin-bottom: 12px;
+}
+.console__footer:not([open]) > summary {
+  margin-bottom: -8px;
+}
+.console__footer > summary:hover {
+  background: var(--line-cyan-dimmer);
+}
+.console__footer > summary::-webkit-details-marker { display: none; }
+.console__footer > summary::marker { content: ""; }
+.console__footer > summary::before {
+  content: "";
+  width: 0;
+  height: 0;
+  flex-shrink: 0;
+  border-style: solid;
+  border-width: 4px 0 4px 6px;
+  border-color: transparent transparent transparent var(--line-cyan);
+  transition: transform 0.15s ease;
+  margin-top: -12px;
+}
+.console__footer[open] > summary::before {
+  transform: rotate(90deg);
+}
+.console__footer-title {
+  flex: 1;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
+}
 
 .console__terms {
+  /* .console__bodyの兄弟要素なので、その左右padding(22px)を継承しない
+     ——ここで明示的に合わせないと左右がconsole__bodyより詰まって見える */
   margin: 18px 0 0;
-  padding-top: 16px;
+  padding: 16px 22px 0;
   border-top: 1px solid var(--line-cyan-dimmer);
   font-size: 10.5px;
   line-height: 1.5;
@@ -333,6 +486,13 @@ body.is-scenario-playing .console__body {
   color: var(--line-cyan);
   font-weight: 600;
 }
+/* 動画保存タブだけは、動画関連機能であることが分かるよう他と違う
+   アクセント色にする（シナリオパネルの色帯・バッジと揃えている） */
+#footerTabVideoBtn.is-active {
+  background: var(--accent-video-dim);
+  border-color: var(--accent-video);
+  color: var(--accent-video);
+}
 
 /* Both panels occupy the same grid cell so the container's height is
    always the taller of the two, regardless of which tab is active —
@@ -350,10 +510,34 @@ body.is-scenario-playing .console__body {
 }
 
 .panel {
-  padding: 18px 0;
+  padding: 18px 0 26px;
   border-bottom: 1px solid var(--line-cyan-dimmer);
 }
 .panel:last-child { border-bottom: none; }
+
+/* シナリオ（動画保存機能一式）パネルだけ、他の静止画向けパネルと
+   ひと目で区別できるよう左に色帯を付ける。console__bodyの左右padding
+   （22px）の内側に収まる分だけ左へ張り出すので、中身の位置は動かない */
+.panel--video {
+  margin-left: -12px;
+  padding-left: 12px;
+  border-left: 3px solid var(--accent-video);
+}
+
+.panel__badge {
+  display: inline-block;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  padding: 2px 7px;
+  border-radius: 999px;
+  vertical-align: middle;
+}
+.panel__badge--video {
+  color: var(--accent-video);
+  border: 1px solid var(--accent-video);
+  background: var(--accent-video-dim);
+}
 
 /* .panel is a <details> element so each section can be collapsed to cut
    down on how much is on screen at once — everything after <summary> is
@@ -366,8 +550,8 @@ body.is-scenario-playing .console__body {
   align-items: center;
   gap: 8px;
   border-radius: var(--radius-s);
-  margin: -6px -8px 0;
-  padding: 6px 8px;
+  margin: -8px -10px 0;
+  padding: 8px 10px;
   transition: background .15s ease;
   /* rapid/repeated clicks on the toggle otherwise get read as a
      double-click and select the title text instead of just collapsing */
@@ -445,11 +629,10 @@ details.collapsible-sub[open] > summary::before {
 
 .panel__title {
   margin: 0 0 12px;
-  font-size: 11px;
-  font-weight: 600;
-  letter-spacing: 0.16em;
-  text-transform: uppercase;
-  color: var(--text-muted);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  color: var(--text-primary);
 }
 
 .panel__title-row {
@@ -509,12 +692,59 @@ details.collapsible-sub[open] > summary::before {
   font-weight: 600;
   letter-spacing: 0.03em;
   padding: 13px 14px;
-  box-shadow: 0 8px 20px -8px rgba(216,178,106,0.6);
 }
 .btn--primary:hover { filter: brightness(1.06); }
 
+/* この場所だけ、下の説明文との間隔が窮屈に見えていたため広げている */
+#scenarioAddLineBtn {
+  margin-bottom: 14px;
+}
+
 .btn-row { display: flex; gap: 8px; }
 .btn-row .btn { flex: 1; }
+
+/* 「再生開始」ボタンを押すと出てくる、書き出し形式（WebM/GIF）を
+   選ぶポップアップメニュー */
+.video-save-menu-wrap {
+  position: relative;
+  flex: 1;
+}
+.video-format-menu {
+  /* display:flexを直接指定すると、同じ詳細度のUA既定スタイル[hidden]
+     （display:none）より後から効いてしまいhidden属性が無視されるため、
+     既定は非表示にしておき.is-openの時だけflexにする */
+  display: none;
+  position: absolute;
+  left: 0;
+  right: 0;
+  bottom: calc(100% + 6px);
+  z-index: 20;
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-cyan);
+  border-radius: var(--radius-s);
+  padding: 4px;
+  flex-direction: column;
+  gap: 2px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.45);
+}
+.video-format-menu.is-open {
+  display: flex;
+}
+.video-format-menu__item {
+  appearance: none;
+  border: none;
+  background: transparent;
+  color: var(--text-primary);
+  text-align: left;
+  font-size: 12.5px;
+  padding: 9px 10px;
+  border-radius: var(--radius-s);
+  cursor: pointer;
+}
+.video-format-menu__item:hover {
+  background: var(--line-cyan-dimmer);
+  color: var(--line-cyan);
+}
 
 .filebtn {
   display: block;
@@ -646,6 +876,29 @@ details.collapsible-sub[open] > summary::before {
   border-color: var(--line-cyan-dimmer);
 }
 
+/* シナリオ行の「現在の状態でこの行を更新」ボタン。「行として追加」の
+   大きなボタンと見た目・位置を分けて混同を防ぐため、キャラクターの
+   表示切替ボタンと同じ小さな正方形アイコンボタンにしている */
+.charlist__update-btn {
+  flex-shrink: 0;
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--line-cyan-dim);
+  background: transparent;
+  color: var(--line-cyan);
+  border-radius: var(--radius-s);
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.charlist__update-btn:hover {
+  border-color: var(--line-cyan);
+  background: var(--line-cyan-dimmer);
+}
+
 /* ---- scenario line list ---- */
 /* シナリオの行には画像サムネイルが無いので、.charlist__thumb/.charlist__name
    の代わりにテキストのプレビューを縦に並べる */
@@ -672,15 +925,6 @@ details.collapsible-sub[open] > summary::before {
   -webkit-box-orient: vertical;
   overflow: hidden;
 }
-.charlist__scenario-mode {
-  flex-shrink: 0;
-  font-size: 10px;
-  padding: 2px 6px;
-  border-radius: 8px;
-  border: 1px solid var(--line-cyan-dim);
-  color: var(--text-faint);
-  white-space: nowrap;
-}
 
 /* 掴んで上下に並び替えるためのハンドル。touch-action:noneはドラッグ中に
    ページのスクロールジェスチャーへ横取りされないようにするため */
@@ -698,9 +942,21 @@ details.collapsible-sub[open] > summary::before {
 .charlist__drag-handle:hover {
   color: var(--line-cyan);
 }
-.charlist__item--scenario.is-dragging {
+.charlist__item.is-dragging {
   opacity: 0.5;
   border-color: var(--line-cyan);
+}
+
+/* シナリオの先頭/末尾に自動挿入される「シナリオ開始」「シナリオ終了」
+   （暗転）行。並び替え・削除ができないことが分かるよう、他の行と少し
+   見た目を変えている（点線の枠＋ドラッグハンドル分の余白なし） */
+.charlist__item--scenario-special {
+  border-style: dashed;
+  border-color: var(--line-cyan-dimmer);
+  cursor: default; /* 行全体のクリックには意味が無い（有効/無効ボタンのみ操作可能） */
+}
+.charlist__item--scenario-special .charlist__scenario-speaker {
+  color: var(--text-muted);
 }
 
 /* ---- character editor ---- */
@@ -1139,7 +1395,8 @@ input[type="range"] {
    同様に適用される。 */
 @media (pointer: coarse) {
   .charlist__del,
-  .charlist__visibility-btn {
+  .charlist__visibility-btn,
+  .charlist__update-btn {
     width: 32px;
     height: 32px;
     font-size: 15px;
