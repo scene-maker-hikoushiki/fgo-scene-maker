@@ -847,6 +847,12 @@
       syncActiveVariant(c); // その場の編集内容をアクティブな差分スロットへ反映してからスナップショットする
       return {
         charId: c.id,
+        // 位置・拡縮も行ごとに保存する——以前は全シーン共通の1値しか
+        // 持たなかったため、同じキャラが複数の場面に出る場合に位置を
+        // 使い分けられなかった
+        x: c.x,
+        y: c.y,
+        scale: c.scale,
         activeExpr: c.activeExpr,
         activeVariantIndex: c.activeVariantIndex,
         visible: c.visible !== false,
@@ -865,6 +871,10 @@
       };
     });
     const front = getFrontmostCharacter();
+    // 背景のズーム/位置/色調も行ごとに保存する——以前は背景アセットその
+    // ものに1組しか持たなかったため、同じ背景画像を複数の場面で使い回すと
+    // 構図を使い分けられなかった（背景が「未設定」の行ではnullのまま）
+    const activeBg = getActiveBackground();
     return {
       id,
       speaker: state.speaker,
@@ -874,6 +884,10 @@
       fontSize: state.fontSize,
       textColor: state.textColor,
       activeBackgroundId: state.activeBackgroundId,
+      backgroundZoom: activeBg ? activeBg.zoom : null,
+      backgroundPanX: activeBg ? activeBg.panX : null,
+      backgroundPanY: activeBg ? activeBg.panY : null,
+      backgroundColorMode: activeBg ? activeBg.colorMode : null,
       sceneColorMode: state.sceneColorMode,
       chars,
       showChoices: state.showChoices,
@@ -1067,6 +1081,12 @@
       // 復元してしまうため、行が指定する表情で必ず上書きする
       c.activeExpr = snap.activeExpr;
       c.variants[c.activeVariantIndex].activeExpr = snap.activeExpr;
+      // 位置・拡縮も行ごとに復元する。この機能追加より前に保存された行には
+      // x/y/scaleが無いので、その場合は「これが正解」という値が無い以上
+      // 現在の位置を変えずに保つ（背景のズーム/位置と同じ考え方）
+      if (typeof snap.x === "number") c.x = snap.x;
+      if (typeof snap.y === "number") c.y = snap.y;
+      if (typeof snap.scale === "number") c.scale = snap.scale;
       // シナリオ再生中に限り、表示状態/不透明度の目標が変わった瞬間を
       // 検知してフェードを開始する——現在実際に見えている（アニメ中かも
       // しれない）不透明度を起点にすることで、フェードの途中でさらに
@@ -1156,6 +1176,19 @@
         bgTransitionAnim = { fromBg: getActiveBackground(), startTime: performance.now() };
       }
       state.activeBackgroundId = line.activeBackgroundId;
+    }
+    // ズーム/位置/色調も行ごとに復元する（背景アセット自身の共有プロパティを
+    // 上書きする——キャラのopacity/departure等と同じ「共有オブジェクトを
+    // 行ごとに書き換える」方式）。この機能追加より前に保存された行には
+    // これらのフィールドが無いので、その場合は現在の値を変えずに保つ
+    // （zoom/panには「これが正解」という値が無いため、activeBackgroundId
+    // と同じ考え方）。
+    const activeBg = getActiveBackground();
+    if (activeBg) {
+      if (typeof line.backgroundZoom === "number") activeBg.zoom = line.backgroundZoom;
+      if (typeof line.backgroundPanX === "number") activeBg.panX = line.backgroundPanX;
+      if (typeof line.backgroundPanY === "number") activeBg.panY = line.backgroundPanY;
+      if (typeof line.backgroundColorMode === "string") activeBg.colorMode = line.backgroundColorMode;
     }
     renderBgList();
     renderBgEditor();
@@ -4824,9 +4857,16 @@
               fontSize: line.fontSize,
               textColor: line.textColor,
               activeBackgroundId: line.activeBackgroundId,
+              backgroundZoom: line.backgroundZoom,
+              backgroundPanX: line.backgroundPanX,
+              backgroundPanY: line.backgroundPanY,
+              backgroundColorMode: line.backgroundColorMode,
               sceneColorMode: line.sceneColorMode,
               chars: line.chars.map((s) => ({
                 charId: s.charId,
+                x: s.x,
+                y: s.y,
+                scale: s.scale,
                 activeExpr: s.activeExpr,
                 activeVariantIndex: s.activeVariantIndex,
                 visible: s.visible,
@@ -5058,12 +5098,24 @@
             // （applyScenarioLine側が「現在表示中の背景を保つ」フォールバック
             // を持っているので、ここでnullにしても背景が消えたりはしない）
             activeBackgroundId: validBgIds.has(line.activeBackgroundId) ? line.activeBackgroundId : null,
+            // 背景のズーム/位置/色調も、この機能追加より前に保存された行には
+            // 無いので、その場合はundefinedのままにしておく——
+            // applyScenarioLine側が数値/文字列でなければ現在の値を変えずに
+            // 保つ仕組みになっている
+            backgroundZoom: typeof line.backgroundZoom === "number" ? line.backgroundZoom : undefined,
+            backgroundPanX: typeof line.backgroundPanX === "number" ? line.backgroundPanX : undefined,
+            backgroundPanY: typeof line.backgroundPanY === "number" ? line.backgroundPanY : undefined,
+            backgroundColorMode: typeof line.backgroundColorMode === "string" ? line.backgroundColorMode : undefined,
             sceneColorMode: typeof line.sceneColorMode === "string" ? line.sceneColorMode : "none",
             chars: Array.isArray(line.chars)
               ? line.chars
                   .filter((s) => s && validCharIds.has(s.charId))
                   .map((s) => ({
                     charId: s.charId,
+                    // 位置・拡縮も同様に、無ければundefinedのままにする
+                    x: typeof s.x === "number" ? s.x : undefined,
+                    y: typeof s.y === "number" ? s.y : undefined,
+                    scale: typeof s.scale === "number" ? s.scale : undefined,
                     activeExpr: typeof s.activeExpr === "number" ? s.activeExpr : -1,
                     activeVariantIndex: typeof s.activeVariantIndex === "number" ? s.activeVariantIndex : 0,
                     visible: typeof s.visible === "boolean" ? s.visible : true,
