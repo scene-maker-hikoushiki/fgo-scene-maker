@@ -290,7 +290,11 @@
           </div>
         </summary>
         <button type="button" class="btn btn--primary" id="scenarioAddLineBtn">現在の画面を追加する</button>
-        <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、このボタンで1行として記録します。行を記録した後で追加したキャラクターは、その行では非表示として扱われます。</p>
+        <div class="btn-row" style="margin-top: 8px;">
+          <button type="button" class="btn btn--sm" id="scenarioAddBlankLineBtn">新規シーンを追加</button>
+          <button type="button" class="btn btn--sm" id="scenarioAddTransitionBtn">場面転換を追加</button>
+        </div>
+        <p class="char-editor__hint">背景・キャラクター・セリフウインドウの各パネルで場面を作り込んでから、「現在の画面を追加する」で1行として記録します。行を記録した後で追加したキャラクターは、その行では非表示として扱われます。「新規シーンを追加」は立ち絵・背景とも何も表示されていない空のシーンを追加します。「場面転換」は暗転を挟んで次のシーンへ切り替える特殊な行です。</p>
 
         <ul class="charlist charlist--scenario" id="scenarioList"><!-- JS populates --></ul>
 

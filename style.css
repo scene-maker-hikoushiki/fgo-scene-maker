@@ -1040,6 +1040,20 @@ details.collapsible-sub[open] > summary::before {
   color: var(--text-muted);
 }
 
+/* 「場面転換」行——削除・並び替えは通常の行と同じくできるので、
+   点線の枠だけで見た目を区別する（開始/終了の特殊行とは別の色で、
+   一覧上でひと目で見分けられるようにする） */
+.charlist__item--scene-transition {
+  border-style: dashed;
+  border-color: var(--accent-gold-dim);
+}
+.charlist__item--scene-transition:hover {
+  border-color: var(--accent-gold);
+}
+.charlist__item--scene-transition .charlist__scenario-speaker {
+  color: var(--accent-gold);
+}
+
 /* ---- character editor ---- */
 .char-editor__hint {
   font-size: 11px;
@@ -1461,6 +1475,11 @@ input[type="range"] {
   }
   .stage__preview-switch {
     display: flex;
+  }
+  /* スマホ幅ではプレビューの横幅も狭くなり、ヒント文言が長いと窮屈に
+     見えるため、この幅でだけ少し小さくする */
+  .stage__hint {
+    font-size: 10.5px;
   }
   /* オフの間は見た目だけ畳む——プレビューを再描画する処理自体は
      動き続けるので、再度ONにした時点ですぐ最新の内容が表示される */

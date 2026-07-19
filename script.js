@@ -11,7 +11,7 @@
   // ---------------- 定数 ----------------
   const CANVAS_W = 1600;
   const CANVAS_H = 900;
-  const MAX_CHARACTERS = 15;
+  const MAX_CHARACTERS = 20;
 
   // キャラクター位置X/Yスライダーの範囲 — キャンバスより広めに取ってあり、
   // 画面外へ半分はみ出す位置までドラッグ/スライドできるようにしている
@@ -328,6 +328,8 @@
   const scenarioCount = document.getElementById("scenarioCount");
   const scenarioEditor = document.getElementById("scenarioEditor");
   const scenarioAddLineBtn = document.getElementById("scenarioAddLineBtn");
+  const scenarioAddBlankLineBtn = document.getElementById("scenarioAddBlankLineBtn");
+  const scenarioAddTransitionBtn = document.getElementById("scenarioAddTransitionBtn");
   const scenarioItemTemplate = document.getElementById("scenarioItemTemplate");
   const scenarioSpecialItemTemplate = document.getElementById("scenarioSpecialItemTemplate");
 
@@ -499,8 +501,8 @@
     // （getDepartureVideoEl参照）。<video>は一度に1つの時刻にしかシークできず、
     // 複数のキャラクターが同時に別々の進行度で退去している可能性があるため。
     if (data.departureVideo) assets.departureVideoSrc = data.departureVideo;
-    // タップエフェクトも同様にデータURIのまま保持する——1回ごとに専用の
-    // <video>を生成して使い捨てる（spawnTapEffect参照）
+    // タップエフェクトも同様にデータURIのまま保持する——シナリオ再生開始時に
+    // 読み込み済みの<video>を複数用意して使い回す（ensureTapEffectPool参照）
     if (data.tapVideo) assets.tapVideoSrc = data.tapVideo;
   }
 
@@ -697,6 +699,27 @@
     return c._opacityAnimFrom + (target - c._opacityAnimFrom) * t;
   }
 
+  // シナリオ再生中に背景（activeBackgroundId）が切り替わった瞬間、瞬時に
+  // 切り替えるのではなくこの時間でクロスフェードさせる——立ち絵の
+  // フェードと同じ考え方。通常編集中は開始されない。
+  const BACKGROUND_FADE_MS = 400;
+  // { fromBg, startTime } — fromBgは切り替わる直前に表示されていた背景
+  // （「背景未設定」だった場合はnull）。applyScenarioLine側で背景の目標が
+  // 変わった瞬間にセットする。
+  let bgTransitionAnim = null;
+
+  // 現在進行中の背景クロスフェードの進捗を返す（0=直前の背景、1=新しい
+  // 背景）。完了済み、またはそもそもアニメ中でなければnull。
+  function getBackgroundTransitionProgress() {
+    if (!bgTransitionAnim) return null;
+    const t = (performance.now() - bgTransitionAnim.startTime) / BACKGROUND_FADE_MS;
+    if (t >= 1) {
+      bgTransitionAnim = null;
+      return null;
+    }
+    return { t, fromBg: bgTransitionAnim.fromBg };
+  }
+
   // 「表示状態」ボタン（削除ボタンの隣）と透明度スライダーは別物——前者は
   // シーンへの登場/退場そのものを切り替えるON/OFF、後者はそのキャラが
   // 表示されている間のフェード具合を決める数値。どちらか一方でも満たさ
@@ -890,6 +913,9 @@
   // それと分かる説明を返す（renderScenarioList参照）。isStartingFade/
   // isEndingFadeの特殊行は呼び出し側であらかじめ弾いておくこと。
   function summarizeScenarioLine(line) {
+    if (line.isSceneTransition) {
+      return { title: "場面転換", body: "暗転を挟んで次のシーンへ切り替えます" };
+    }
     const isDeparture = lineHasDeparture(line);
     const departingNames = isDeparture
       ? line.chars
@@ -947,11 +973,12 @@
     ensureEndingFadeLine();
   }
 
-  function captureScenarioLine() {
-    const line = buildScenarioLineFromLiveState(nextScenarioLineId++);
-    // 選択中の行があれば、その直後に挿入する——無ければ（未選択なら）
-    // 従来通り末尾に追加する。開始/終了の特殊行は選択され得ないので、
-    // ここでのselectedIndexは常に実質的な行を指す。
+  // 選択中の行があれば、その直後に挿入する——無ければ（未選択なら）末尾に
+  // 追加する。開始/終了の特殊行は選択され得ないので、ここでの
+  // selectedIndexは常に実質的な行を指す。行を新規追加する全箇所
+  // （captureScenarioLine・addBlankScenarioLine・addSceneTransitionLine）で
+  // 共通の挿入ロジックとして使う。
+  function insertScenarioLineAtSelection(line) {
     const selectedIndex = state.scenario.findIndex((l) => l.id === state.scenarioSelectedId);
     if (selectedIndex === -1) {
       state.scenario.push(line);
@@ -963,6 +990,59 @@
     renderScenarioList();
     renderScenarioEditor();
     renderBgmList(); // 実質的な行数が変わったので、BGMの範囲セレクトの選択肢も更新する
+  }
+
+  function captureScenarioLine() {
+    const line = buildScenarioLineFromLiveState(nextScenarioLineId++);
+    insertScenarioLineAtSelection(line);
+  }
+
+  // 「新規シーンを追加」——立ち絵・背景とも何も表示されていない、完全に
+  // 空の状態の行を作る。buildScenarioLineFromLiveStateと違い現在の
+  // ライブ状態を一切コピーしない——chars:[]（誰のスナップショットも
+  // 持たない）にすることで、行の適用時に全キャラが自動的に非表示扱いに
+  // なる（applyScenarioLine参照）。
+  function buildBlankScenarioLine(id) {
+    return {
+      id,
+      speaker: "",
+      body: "",
+      activeCharId: null,
+      nameplateOn: true,
+      fontSize: BODY_DEFAULT_FONT_SIZE,
+      textColor: "#ffffff",
+      activeBackgroundId: null,
+      sceneColorMode: "none",
+      chars: [],
+      showChoices: false,
+      choiceCount: 2,
+      choice1: "",
+      choice2: "",
+      choice3: "",
+      choice1Color: "#ffffff",
+      choice2Color: "#ffffff",
+      choice3Color: "#ffffff",
+    };
+  }
+
+  function addBlankScenarioLine() {
+    const line = buildBlankScenarioLine(nextScenarioLineId++);
+    insertScenarioLineAtSelection(line);
+    // 追加した空のシーンを即座にプレビューへ反映する——今の画面をそのまま
+    // 使うcaptureScenarioLineと違い、これは今の画面と中身が違うため
+    applyScenarioLine(line);
+  }
+
+  // 「場面転換」——暗転を挟んで次のシーンへ切り替える特殊行。シナリオ開始/
+  // 終了と違い先頭/末尾には固定されず、通常の行と同じように途中への
+  // 挿入・削除・並び替えができる（moveScenarioLine/removeScenarioLineの
+  // ガードはisStartingFade/isEndingFadeだけを見ているので、この行は
+  // そのまま対象になる）。ライブ状態のスナップショット（chars等）は
+  // 持たない——再生時はgoToScenarioLineが暗転演出とともに特別に処理する
+  // （applyScenarioLineは呼ばれない）ため、追加してもプレビューは変化しない。
+  function addSceneTransitionLine() {
+    const line = { id: nextScenarioLineId++, isSceneTransition: true };
+    insertScenarioLineAtSelection(line);
   }
 
   function updateScenarioLineFromLiveState(line) {
@@ -1070,6 +1150,11 @@
     // 現在表示中の背景を変えずに保つ——背景が1枚も登録されていなければ
     // 「未設定」だけが唯一あり得る状態なので、この場合も自然と一致する
     if (state.backgrounds.some((b) => b.id === line.activeBackgroundId)) {
+      // シナリオ再生中に背景が実際に変わる場合だけ、切り替わる直前の背景を
+      // 起点にクロスフェードを始める（通常編集中のクリックでは即座に切り替える）
+      if (playback && line.activeBackgroundId !== state.activeBackgroundId) {
+        bgTransitionAnim = { fromBg: getActiveBackground(), startTime: performance.now() };
+      }
       state.activeBackgroundId = line.activeBackgroundId;
     }
     renderBgList();
@@ -1880,29 +1965,52 @@
   }
 
   // ---- タップエフェクト（手動進行でクリック/タップした位置に出す演出） ----
-  // 退去エフェクトと違い進行度を追わず、押した瞬間に一度だけ最初から
-  // 最後まで再生させる使い捨ての<video>——同時に複数箇所タップされても
-  // それぞれ独立して鳴らせるよう、インスタンスごとに新しい<video>を作る。
-  let tapEffects = []; // { video, x, y }
+  // タップのたびに<video>を新規生成してdata: URLをデコードさせると、
+  // デコーダ起動のオーバーヘッドで表示が遅れ、連打すると同時に何個も
+  // デコーダが立ち上がって重くなる。そのため、あらかじめ読み込み済みの
+  // <video>を数個だけ使い回すプール方式にする——タップ時はcurrentTimeを
+  // 0に戻して鳴らし直すだけで済み、体感の遅延も同時再生数も抑えられる。
+  const TAP_EFFECT_POOL_SIZE = 4;
+  let tapEffectPool = []; // { video, x, y, active, lastUsedAt }
+
+  // プールを初回だけ生成する。シナリオ再生開始時（startScenarioPlayback）に
+  // 呼んでおくことで、実際に最初のタップが起きる前に各<video>のデコード
+  // 準備を済ませておける（暗転演出中はどのみちクリックを無視するので、
+  // その間に十分読み込みが進む）。
+  function ensureTapEffectPool() {
+    if (tapEffectPool.length > 0 || !assets.tapVideoSrc) return;
+    for (let i = 0; i < TAP_EFFECT_POOL_SIZE; i++) {
+      const video = document.createElement("video");
+      video.src = assets.tapVideoSrc;
+      video.muted = true;
+      video.playsInline = true;
+      video.preload = "auto";
+      const slot = { video, x: 0, y: 0, active: false, lastUsedAt: 0 };
+      video.addEventListener("ended", () => {
+        slot.active = false;
+      });
+      tapEffectPool.push(slot);
+    }
+  }
 
   function spawnTapEffect(x, y) {
     if (!assets.tapVideoSrc) return;
-    const video = document.createElement("video");
-    video.src = assets.tapVideoSrc;
-    video.muted = true;
-    video.playsInline = true;
-    video.preload = "auto";
-    const effect = { video, x, y };
-    tapEffects.push(effect);
-    // 再生が終わったら一覧から取り除く——loop無しの一度きり再生なので、
-    // 通常は自然にendedが発火する
-    video.addEventListener("ended", () => {
-      tapEffects = tapEffects.filter((e) => e !== effect);
-    });
-    video.play().catch(() => {
-      // 再生に失敗した場合（自動再生ブロック等）は絵が一切出ないままに
-      // なってしまうので、一覧からも即座に取り除く
-      tapEffects = tapEffects.filter((e) => e !== effect);
+    ensureTapEffectPool(); // 万が一再生開始時の予備読み込みが無かった場合の保険
+    // 空いているスロットを使う。連打等で全スロットが使用中の場合は、
+    // 新しい<video>を増やすのではなく、一番古くから使われているものを
+    // 横取りして鳴らし直す——同時再生数を常にプールサイズ以内に抑える。
+    let slot = tapEffectPool.find((s) => !s.active);
+    if (!slot) {
+      slot = tapEffectPool.reduce((oldest, s) => (s.lastUsedAt < oldest.lastUsedAt ? s : oldest), tapEffectPool[0]);
+    }
+    if (!slot) return; // アセット未読み込みでプールが1つも無い場合
+    slot.x = x;
+    slot.y = y;
+    slot.active = true;
+    slot.lastUsedAt = performance.now();
+    slot.video.currentTime = 0;
+    slot.video.play().catch(() => {
+      slot.active = false;
     });
   }
 
@@ -1910,15 +2018,16 @@
   // 呼ぶ——退去エフェクトと同じ加算合成（"screen"）で、UI（ボタン等）より
   // さらに手前、最後に描画する。
   function drawTapEffects(context) {
-    if (tapEffects.length === 0) return;
-    tapEffects.forEach(({ video, x, y }) => {
+    tapEffectPool.forEach((slot) => {
+      if (!slot.active) return;
+      const video = slot.video;
       if (video.readyState < 2 || !video.videoWidth) return; // まだフレームがデコードされていない
       const h = TAP_EFFECT_SIZE;
       const w = h * (video.videoWidth / video.videoHeight);
       context.save();
       context.globalAlpha = 1;
       context.globalCompositeOperation = "screen";
-      context.drawImage(video, x - w / 2, y - h / 2, w, h);
+      context.drawImage(video, slot.x - w / 2, slot.y - h / 2, w, h);
       context.restore();
     });
   }
@@ -2202,17 +2311,22 @@
   function drawScene(context) {
     context.clearRect(0, 0, CANVAS_W, CANVAS_H);
 
-    // 「シナリオ開始/終了」の暗転演出中、および退去エフェクト再生行の間は、
-    // セリフウインドウ・選択肢・LOG/AUTO/NEXTを出さない（退去エフェクト
-    // 再生行ではSKIPだけは通常通り表示したままにする——SKIP以外のボタン類
-    // を隠す、という仕様のため）。開始/終了の暗転中はSKIP自体も通常描画は
-    // 隠す——drawStartingFadeOverlay/drawEndingFadeOverlay側が独立して
-    // 描き直すので、ここで隠れても演出には影響しない。
-    const isStartOrEndFadeLine =
-      playback && playback.currentLine && (playback.currentLine.isStartingFade || playback.currentLine.isEndingFade);
+    // 「シナリオ開始/終了/場面転換」の暗転演出中、および退去エフェクト
+    // 再生行の間は、セリフウインドウ・選択肢・LOG/AUTO/NEXTを出さない
+    // （退去エフェクト再生行ではSKIPだけは通常通り表示したままにする——
+    // SKIP以外のボタン類を隠す、という仕様のため）。暗転演出中はSKIP自体も
+    // 通常描画は隠す——drawStartingFadeOverlay/drawEndingFadeOverlay/
+    // drawSceneTransitionOverlay側がそれぞれ独立して描き直す（場面転換は
+    // SKIPごと隠したままにする）ので、ここで隠れても演出には影響しない。
+    const isSpecialFadeLine =
+      playback &&
+      playback.currentLine &&
+      (playback.currentLine.isStartingFade ||
+        playback.currentLine.isEndingFade ||
+        playback.currentLine.isSceneTransition);
     const isDepartureLine = playback && lineHasDeparture(playback.currentLine);
-    const suppressLineUI = isStartOrEndFadeLine || isDepartureLine;
-    const suppressSkip = isStartOrEndFadeLine;
+    const suppressLineUI = isSpecialFadeLine || isDepartureLine;
+    const suppressSkip = isSpecialFadeLine;
 
     // 背景 — グレースケールはこのブロックだけに適用されるよう
     // save/restoreで範囲を限定し、後で描画するセリフウインドウ/選択肢/
@@ -2222,15 +2336,31 @@
     const bgMode = effectiveColorMode(activeBg && activeBg.colorMode, state.sceneColorMode);
     const bgFilter = colorModeFilter(bgMode);
     if (bgFilter) context.filter = bgFilter;
-    if (activeBg) {
-      drawBackgroundImage(context, activeBg, 0, 0, CANVAS_W, CANVAS_H);
+    const drawBgOrPlaceholder = (bg) => {
+      if (bg) {
+        drawBackgroundImage(context, bg, 0, 0, CANVAS_W, CANVAS_H);
+      } else {
+        context.fillStyle = "#9ED0E4";
+        context.fillRect(0, 0, CANVAS_W, CANVAS_H);
+      }
+    };
+    const bgTransition = getBackgroundTransitionProgress();
+    if (bgTransition) {
+      // クロスフェード中——直前の背景をそのまま描き、その上に新しい背景を
+      // 進捗に応じた不透明度で重ねて溶暗/溶明させる
+      drawBgOrPlaceholder(bgTransition.fromBg);
+      context.save();
+      context.globalAlpha = bgTransition.t;
+      drawBgOrPlaceholder(activeBg);
+      context.restore();
     } else {
-      context.fillStyle = "#9ED0E4";
-      context.fillRect(0, 0, CANVAS_W, CANVAS_H);
-      context.fillStyle = "#3a4562";
-      context.font = "24px " + bodyFontStack();
-      context.textAlign = "center";
-      context.fillText("背景未設定", CANVAS_W / 2, CANVAS_H / 2);
+      drawBgOrPlaceholder(activeBg);
+      if (!activeBg) {
+        context.fillStyle = "#3a4562";
+        context.font = "24px " + bodyFontStack();
+        context.textAlign = "center";
+        context.fillText("背景未設定", CANVAS_W / 2, CANVAS_H / 2);
+      }
     }
     context.restore();
 
@@ -2459,17 +2589,17 @@
   // 名前欄（左側）とは反対の右側、LOGアイコンの少し上に配置している。
   function drawWatermark(context) {
     context.save();
-    context.font = "34px " + bodyFontStack();
+    context.font = "32px " + bodyFontStack();
     context.textAlign = "right";
     context.textBaseline = "bottom";
     // ぼかしただけの影は明るい背景の上だとほとんど溶けて見えなくなるため、
     // 縁取り（strokeText）で背景の明暗によらず一定のコントラストを確保する
     context.lineJoin = "round";
     context.lineWidth = 6;
-    context.strokeStyle = "rgba(0, 0, 0, 0.55)";
-    context.fillStyle = "rgba(255, 255, 255, 0.7)";
-    const x = CANVAS_W - 40;
-    const y = ICON_LOG_Y - 20;
+    context.strokeStyle = "rgba(0, 0, 0, 0.4)";
+    context.fillStyle = "rgba(255, 255, 255, 0.6)";
+    const x = CANVAS_W - 100;
+    const y = ICON_LOG_Y + 12;
     context.strokeText("非公式シナリオ画面メーカー", x, y);
     context.fillText("非公式シナリオ画面メーカー", x, y);
     context.restore();
@@ -2816,9 +2946,9 @@
     const pos = getCanvasPos(evt);
 
     if (playback) {
-      // 暗転演出中（開始・終了どちらも）は一切のクリックを無視する
-      // （SKIPの連打による再トリガーも防ぐ）
-      if (startingFadeAnim || endingFadeAnim) return;
+      // 暗転演出中（開始・終了・場面転換のいずれも）は一切のクリックを
+      // 無視する（SKIPの連打による再トリガーも防ぐ）
+      if (startingFadeAnim || endingFadeAnim || sceneTransitionAnim) return;
 
       // 選択肢・SKIPなど、実際に何が起きるかに関わらず、再生中に受け付ける
       // クリック/タップには必ずその位置へ演出を出す（本家のタップ演出と
@@ -2845,7 +2975,7 @@
       }
 
       const line = playback.currentLine;
-      if (line && (line.isStartingFade || line.isEndingFade)) return; // 通常は上のガードで既に弾かれる
+      if (line && (line.isStartingFade || line.isEndingFade || line.isSceneTransition)) return; // 通常は上のガードで既に弾かれる
       // 退去エフェクト再生行はSKIP/AUTO以外クリックしても何も起きない
       // ——対象キャラ全員の退去が完了するまで進行方式に関わらず進めない
       if (line && lineHasDeparture(line)) return;
@@ -4182,16 +4312,25 @@
       node.querySelector(".charlist__scenario-speaker").textContent = realLineNumber + ". " + summary.title;
       node.querySelector(".charlist__scenario-body").textContent = summary.body;
       if (line.id === state.scenarioSelectedId) node.classList.add("is-selected");
+      if (line.isSceneTransition) node.classList.add("charlist__item--scene-transition");
       node.addEventListener("click", () => {
         state.scenarioSelectedId = line.id;
-        applyScenarioLine(line);
+        // 場面転換行はライブ状態のスナップショットを持たないため、選択する
+        // （並び替え/削除のため）だけでプレビューには反映しない
+        if (!line.isSceneTransition) applyScenarioLine(line);
         renderScenarioList();
         renderScenarioEditor();
       });
-      node.querySelector(".charlist__update-btn").addEventListener("click", (e) => {
-        e.stopPropagation(); // 行のクリック（内容の読み込み）を誘発しない
-        updateScenarioLineFromLiveState(line);
-      });
+      const updateBtn = node.querySelector(".charlist__update-btn");
+      if (line.isSceneTransition) {
+        // 場面転換行には「現在の状態」という概念が無いため、更新ボタンは無意味——隠す
+        updateBtn.hidden = true;
+      } else {
+        updateBtn.addEventListener("click", (e) => {
+          e.stopPropagation(); // 行のクリック（内容の読み込み）を誘発しない
+          updateScenarioLineFromLiveState(line);
+        });
+      }
       node.querySelector(".charlist__del").addEventListener("click", (e) => {
         e.stopPropagation();
         removeScenarioLine(line.id);
@@ -4674,6 +4813,8 @@
           ? { id: line.id, isStartingFade: true, enabled: line.enabled }
           : line.isEndingFade
           ? { id: line.id, isEndingFade: true, enabled: line.enabled }
+          : line.isSceneTransition
+          ? { id: line.id, isSceneTransition: true }
           : {
               id: line.id,
               speaker: line.speaker,
@@ -4897,6 +5038,11 @@
             id: typeof line.id === "number" ? line.id : nextScenarioLineId++,
             isEndingFade: true,
             enabled: line.enabled !== false,
+          }
+        : line && line.isSceneTransition
+        ? {
+            id: typeof line.id === "number" ? line.id : nextScenarioLineId++,
+            isSceneTransition: true,
           }
         : {
             id: typeof line.id === "number" ? line.id : nextScenarioLineId++,
@@ -5130,6 +5276,14 @@
 
   scenarioAddLineBtn.addEventListener("click", () => {
     captureScenarioLine();
+  });
+
+  scenarioAddBlankLineBtn.addEventListener("click", () => {
+    addBlankScenarioLine();
+  });
+
+  scenarioAddTransitionBtn.addEventListener("click", () => {
+    addSceneTransitionLine();
   });
 
   // ---------------- GIF書き出し ----------------
@@ -5737,6 +5891,63 @@
     }
   }
 
+  // 「場面転換」特殊行の暗転演出——開始/終了の暗転と違い、SKIPボタンの
+  // フェード演出は挟まず単純に「暗転→少し静止→復帰」の山型で進む。
+  //   1. 0〜SCENE_TRANSITION_FADE_MS: 画面が黒くフェードインする
+  //      （この間はまだ前のシーンを表示したまま——切り替えはまだ行わない）
+  //   2. 完全に暗転した瞬間、次の行の状態を初めて反映する（真っ黒の裏で
+  //      切り替えるため、画面上では一切見えない）
+  //   3. そのままSCENE_TRANSITION_HOLD_MSの間、真っ黒のまま静止する
+  //   4. その後SCENE_TRANSITION_FADE_MSかけて暗転が晴れていく（既に
+  //      次の行の状態になっている画面が現れる）
+  // 晴れ切ったら実際に次の行へ進む（advanceScenarioPlayback）。
+  // { startTime, nextLine, appliedNextLine }
+  const SCENE_TRANSITION_FADE_MS = 1500;
+  const SCENE_TRANSITION_HOLD_MS = 600;
+  let sceneTransitionAnim = null;
+
+  // nextLineは、暗転が完全に終わった瞬間に反映する行（無ければnull——
+  // 例えば次が「シナリオ終了」の特殊行の場合など、goToScenarioLine側で
+  // あらかじめ弾いてから渡される）。
+  function beginSceneTransitionAnim(nextLine) {
+    sceneTransitionAnim = { startTime: performance.now(), nextLine, appliedNextLine: false };
+  }
+
+  function sceneTransitionProgress() {
+    if (!sceneTransitionAnim) return null;
+    const elapsed = performance.now() - sceneTransitionAnim.startTime;
+    const clearElapsed = elapsed - SCENE_TRANSITION_FADE_MS - SCENE_TRANSITION_HOLD_MS;
+    const screenAlpha =
+      clearElapsed <= 0 ? Math.min(1, elapsed / SCENE_TRANSITION_FADE_MS) : Math.max(0, 1 - clearElapsed / SCENE_TRANSITION_FADE_MS);
+    return { elapsed, screenAlpha };
+  }
+
+  // 再生中は毎フレーム呼ぶ。画面が完全に暗転した瞬間に次の行の状態を
+  // 反映し、完全に晴れ切ったら実際に次の行へ進む。
+  function updateSceneTransitionAnim() {
+    const progress = sceneTransitionProgress();
+    if (!progress) return;
+    if (!sceneTransitionAnim.appliedNextLine && progress.elapsed >= SCENE_TRANSITION_FADE_MS) {
+      sceneTransitionAnim.appliedNextLine = true;
+      if (sceneTransitionAnim.nextLine) applyScenarioLine(sceneTransitionAnim.nextLine);
+    }
+    const totalMs = SCENE_TRANSITION_FADE_MS * 2 + SCENE_TRANSITION_HOLD_MS;
+    if (progress.elapsed >= totalMs) {
+      sceneTransitionAnim = null;
+      advanceScenarioPlayback();
+    }
+  }
+
+  function drawSceneTransitionOverlay(context) {
+    const progress = sceneTransitionProgress();
+    if (!progress) return;
+    context.save();
+    context.globalAlpha = progress.screenAlpha;
+    context.fillStyle = "#000000";
+    context.fillRect(0, 0, CANVAS_W, CANVAS_H);
+    context.restore();
+  }
+
   // シナリオ再生中の退去エフェクトは、静止編集でのスクラブ用の等倍速より
   // テンポよく見えるよう、この倍率で再生する
   const DEPARTURE_PLAYBACK_RATE = 2.3;
@@ -5838,7 +6049,7 @@
         // おき、実際に1行目へ移った瞬間（下のelse以外の通常分岐）に
         // あらためてapplyScenarioLineが呼ばれ、そちらの設定に従って表示される。
         const nextLine = state.scenario[index + 1];
-        if (nextLine && !nextLine.isEndingFade) applyScenarioLine(nextLine);
+        if (nextLine && !nextLine.isEndingFade && !nextLine.isSceneTransition) applyScenarioLine(nextLine);
         beginStartingFade();
       } else {
         advanceScenarioPlayback();
@@ -5860,6 +6071,21 @@
       } else {
         stopScenarioPlayback();
       }
+      renderAll();
+      return;
+    }
+    if (line.isSceneTransition) {
+      // 暗転前のフェード中は前のシーンを表示したままにしたいので、次の
+      // 行の状態はここでは反映しない——完全に暗転した瞬間（画面が真っ黒に
+      // なった裏側）で初めてbeginSceneTransitionAnim内部から反映される
+      // （updateSceneTransitionAnim参照）。ウインドウ・選択肢・SKIP以外の
+      // ボタン類はdrawScene側でこの行の間ずっと非表示にしておき、実際に
+      // 次の行へ移った瞬間（advanceScenarioPlayback経由）にあらためて
+      // applyScenarioLineが呼ばれ、そちらの設定に従って表示される。
+      const nextLine = state.scenario[index + 1];
+      const preloadableNextLine =
+        nextLine && !nextLine.isStartingFade && !nextLine.isEndingFade && !nextLine.isSceneTransition ? nextLine : null;
+      beginSceneTransitionAnim(preloadableNextLine);
       renderAll();
       return;
     }
@@ -5944,9 +6170,13 @@
       playback.currentBgmTrack = null;
     }
     // 再生中に出したタップエフェクトが残ったまま（通常編集に戻ってから
-    // 古い1フレームが描かれ続ける等）にならないよう、後始末する
-    tapEffects.forEach(({ video }) => video.pause());
-    tapEffects = [];
+    // 古い1フレームが描かれ続ける等）にならないよう、後始末する。
+    // プール自体（<video>要素）は次回の再生開始時にすぐ使えるよう破棄せず
+    // 残しておき、activeフラグだけ倒す。
+    tapEffectPool.forEach((slot) => {
+      slot.video.pause();
+      slot.active = false;
+    });
     // フェードの途中で再生が終わった場合、通常編集に戻った時に中途半端な
     // 不透明度のまま固まって見えないよう、進行中のフェードを打ち切る
     // （c.opacity/c.visibleは既にそれぞれの行の目標値になっているので、
@@ -5954,6 +6184,8 @@
     state.characters.forEach((c) => {
       c._opacityAnimStartTime = null;
     });
+    // 背景のクロスフェードも同様に、途中で止まったまま持ち越さないよう打ち切る
+    bgTransitionAnim = null;
     if (gifCapture) {
       // GIFの生成・ダウンロードは非同期（数秒かかりうる）——再生セッション
       // 自体の後始末はここで先に終わらせ、完了は待たない
@@ -6004,6 +6236,10 @@
     // 最後のタイミング——BGM再生（updateBgmPlaybackForLine）はこの後
     // 非同期に始まるため、先に済ませておく
     if (bgmAudioCtx && bgmAudioCtx.state === "suspended") bgmAudioCtx.resume();
+    // タップエフェクト用の<video>プールも、実際に最初のタップが起きる前に
+    // ここで読み込みを始めておく——開始演出（暗転）が明けるまでの間に
+    // デコードの準備が済むので、最初のタップから遅延なく表示できる
+    ensureTapEffectPool();
 
     if (mode === "record" || mode === "gif") {
       // 録画・GIFキャプチャ専用のオフスクリーンcanvasにdrawSceneだけを
@@ -6096,6 +6332,7 @@
     choiceAnim = null;
     endingFadeAnim = null;
     startingFadeAnim = null;
+    sceneTransitionAnim = null;
     departureLineAnim = null;
     const tick = () => {
       if (!playback) return;
@@ -6103,6 +6340,7 @@
       updateDialogueAnim();
       updateChoiceAnim();
       updateEndingFadeAnim();
+      updateSceneTransitionAnim();
       updateDepartureLineAnim();
       // 上記のいずれかがstopScenarioPlayback()を呼んだ場合、playbackは
       // 既にnullになっている——以降の描画やoffscreenCtxへのアクセスをやめる
@@ -6111,10 +6349,12 @@
       drawEditorOverlay(ctx); // state.selectedIdは再生中null固定なので実質no-op
       drawStartingFadeOverlay(ctx);
       drawEndingFadeOverlay(ctx);
+      drawSceneTransitionOverlay(ctx);
       if (playback.offscreenCtx) {
         drawScene(playback.offscreenCtx);
         drawStartingFadeOverlay(playback.offscreenCtx);
         drawEndingFadeOverlay(playback.offscreenCtx);
+        drawSceneTransitionOverlay(playback.offscreenCtx);
       }
       captureGifFrameIfDue();
       playback.rafId = requestAnimationFrame(tick);
@@ -6153,7 +6393,7 @@
     // 選択肢表示中・暗転行では進行方式に関わらず常に一時停止のまま
     // （選択されるまで進めない）——モード表示だけ切り替え、タイマー周りは
     // 一切触らない
-    if (!line || line.isStartingFade || line.isEndingFade || line.showChoices) {
+    if (!line || line.isStartingFade || line.isEndingFade || line.isSceneTransition || line.showChoices) {
       renderAll();
       return;
     }
