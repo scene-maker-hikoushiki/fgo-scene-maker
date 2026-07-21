@@ -55,6 +55,17 @@
   // （横方向の9-patch/9-sliceのような仕組み）。
   const NAME_BOX_SRC_LEFT_CAP = 144;
   const NAME_BOX_SRC_RIGHT_CAP = 882;
+  // scroll.png（150×350）内の、ダイヤモンド型の先端が終わる位置——概算値。
+  // 見た目が合わなければここを調整する。
+  const LOG_SCROLLBAR_SRC_TOP_CAP = 75;
+  const LOG_SCROLLBAR_SRC_BOTTOM_CAP = 275;
+  // scroll.pngは上下に余白（完全透明のピクセル）が入っており、実際に絵が
+  // 描かれているのはY=40〜309の範囲だけ（Pillowでアルファ値を走査して実測）。
+  // この余白を含めたまま描画すると、つまみを上下いっぱいまで動かしても
+  // 見た目上は絵の先端がトラックの端まで届かず隙間が空いてしまうため、
+  // 上下キャップの描画時はこの余白を切り捨てて詰める。
+  const LOG_SCROLLBAR_SRC_CONTENT_TOP = 40;
+  const LOG_SCROLLBAR_SRC_CONTENT_BOTTOM = 310;
   // 名前テキストと、右側のフェードアウトが平坦な帯を侵食し始める位置との間に
   // 保つ余白
   const NAME_BOX_TEXT_PADDING = 26;
@@ -489,7 +500,7 @@
   async function loadAllAssets() {
     const data = window.__ASSET_DATA__;
     if (!data) throw new Error("assets-data.js が読み込まれていません。");
-    const keys = ["textbox", "nameBox", "linesBox", "skip", "log", "auto", "next"];
+    const keys = ["textbox", "nameBox", "linesBox", "skip", "log", "auto", "next", "scroll"];
     await Promise.all(
       keys.map(async (key) => {
         if (!data[key]) throw new Error("素材が見つかりません: " + key);
@@ -2069,6 +2080,10 @@
   // 記法（青空文庫のテキストと同じ慣習）:
   //   漢字《かんじ》        → ベースは"《"の直前に連続する漢字の並びから
   //                          自動検出される
+  //   〔強調したい範囲〕     → ルビとは別に、範囲内の各文字の上に圏点
+  //                          （・）を打って強調する。中身はもう一度この
+  //                          パーサーに通すので、ルビと組み合わせて
+  //                          〔漢字《かんじ》〕のようにも書ける。
   //   ｜任意の範囲《よみ》   → "｜"でベーステキストの開始位置を明示的に
   //                          指定し、単語単位で細かく制御できる
   const CJK_RE = /[\u4E00-\u9FFF\u3400-\u4DBF々〆〤]/;
@@ -2078,6 +2093,20 @@
     let i = 0;
     while (i < para.length) {
       const ch = para[i];
+      if (ch === "〔") {
+        const emphasisEnd = para.indexOf("〕", i);
+        if (emphasisEnd !== -1) {
+          const inner = para.slice(i + 1, emphasisEnd);
+          // ネストしたルビにも対応できるよう、中身をもう一度この関数で
+          // パースしてから、出てきたrun全部に強調フラグを付け足す
+          parseRubyParagraph(inner).forEach((r) => runs.push({ ...r, emphasis: true }));
+          i = emphasisEnd + 1;
+          continue;
+        }
+        runs.push({ type: "text", ch });
+        i++;
+        continue;
+      }
       if (ch === "｜" || ch === "|") {
         const rubyStart = para.indexOf("《", i);
         if (rubyStart !== -1) {
@@ -2208,6 +2237,21 @@
   // 時点で打ち切る（シナリオ再生中のタイプライター表示用）。省略時は
   // Infinityになり、これまで通り全文を描画する——既存の呼び出し箇所
   // （名前欄、静止時の本文描画）は挙動が変わらない。
+  // 圏点（傍点）——ルビとは別に、文字の上に小さな点を打って強調する
+  // （〔強調したい範囲〕記法、parseRubyParagraph参照）。フォントの
+  // グリフに頼らず円を描くことで、フォント/サイズが変わっても見た目が
+  // 一定になるようにしている。
+  function drawEmphasisDot(context, centerX, baselineY, fontSize, fillStyle) {
+    const dotY = baselineY - fontSize * 1.1;
+    const dotR = Math.max(1.5, fontSize * 0.08);
+    context.save();
+    context.fillStyle = fillStyle;
+    context.beginPath();
+    context.arc(centerX, dotY, dotR, 0, Math.PI * 2);
+    context.fill();
+    context.restore();
+  }
+
   function renderBodyLines(context, lines, x, topY, fontSize, color, revealCount = Infinity) {
     const rubyFontPx = rubyFontSize(fontSize);
     const lineHeight = Math.round(fontSize * 1.6 + fontSize * 0.0);
@@ -2234,7 +2278,9 @@
           context.font = fontSize + "px " + bodyFontStack();
           context.fillStyle = gradient;
           context.fillText(run.ch, cursorX, baselineY);
-          cursorX += context.measureText(run.ch).width + LETTER_SPACING;
+          const charW = context.measureText(run.ch).width;
+          if (run.emphasis) drawEmphasisDot(context, cursorX + charW / 2, baselineY, fontSize, gradient);
+          cursorX += charW + LETTER_SPACING;
         } else {
           context.font = fontSize + "px " + bodyFontStack();
           const baseW = context.measureText(run.base).width;
@@ -2245,6 +2291,7 @@
           context.font = fontSize + "px " + bodyFontStack();
           context.fillStyle = gradient;
           context.fillText(run.base, cursorX + (w - baseW) / 2, baselineY);
+          if (run.emphasis) drawEmphasisDot(context, cursorX + w / 2, baselineY, fontSize, gradient);
 
           const rubyBaselineY = baselineY - fontSize * 0.95;
           context.font = rubyFontPx + "px " + bodyFontStack();
@@ -2303,6 +2350,41 @@
       y,
       rightCapW,
       targetH
+    );
+  }
+
+  // assets.scroll（LOGログのスクロールバーのつまみ）を`targetH`まで
+  // 引き伸ばして描画する。drawNameBoxの縦方向版——上下の先端（ダイヤモンド
+  // 型の切り欠き）は元の比率のまま保ち、中央のまっすぐな帯だけを
+  // 伸縮させる縦方向の9-patch/9-slice。ログが長くなるほどtargetHが
+  // 小さくなり、逆に短ければ大きくなる（drawLogScrollbar参照）。
+  function drawScrollHandle(context, img, x, y, targetW, targetH) {
+    const srcW = img.naturalWidth;
+    const scale = targetW / srcW;
+    // 上下キャップは、透明な余白（LOG_SCROLLBAR_SRC_CONTENT_TOP/BOTTOM の
+    // 外側）を含めずに絵の部分だけを詰めて描く——そうしないと、つまみを
+    // 上下の限界まで動かしても絵の先端がトラック端に届かず隙間が空いて見える。
+    const topCapSrcH = LOG_SCROLLBAR_SRC_TOP_CAP - LOG_SCROLLBAR_SRC_CONTENT_TOP;
+    const topCapH = topCapSrcH * scale;
+    const bottomCapSrcH = LOG_SCROLLBAR_SRC_CONTENT_BOTTOM - LOG_SCROLLBAR_SRC_BOTTOM_CAP;
+    const bottomCapH = bottomCapSrcH * scale;
+    const middleSrcH = LOG_SCROLLBAR_SRC_BOTTOM_CAP - LOG_SCROLLBAR_SRC_TOP_CAP;
+    const middleDstH = Math.max(0, targetH - topCapH - bottomCapH);
+
+    context.drawImage(img, 0, LOG_SCROLLBAR_SRC_CONTENT_TOP, srcW, topCapSrcH, x, y, targetW, topCapH);
+    if (middleDstH > 0) {
+      context.drawImage(img, 0, LOG_SCROLLBAR_SRC_TOP_CAP, srcW, middleSrcH, x, y + topCapH, targetW, middleDstH);
+    }
+    context.drawImage(
+      img,
+      0,
+      LOG_SCROLLBAR_SRC_BOTTOM_CAP,
+      srcW,
+      bottomCapSrcH,
+      x,
+      y + topCapH + middleDstH,
+      targetW,
+      bottomCapH
     );
   }
 
@@ -2901,7 +2983,7 @@
   }
 
   // ---------------- キャンバスのポインタ操作 ----------------
-  let dragMode = null; // 'move' | 'resize' | 'bg-pan' | null
+  let dragMode = null; // 'move' | 'resize' | 'bg-pan' | 'log-scroll' | 'log-scrollbar' | null
   let dragOffsetX = 0;
   let dragOffsetY = 0;
   let dragStartDist = 0;
@@ -2983,6 +3065,29 @@
       // 無視する（SKIPの連打による再トリガーも防ぐ）
       if (startingFadeAnim || endingFadeAnim || sceneTransitionAnim) return;
 
+      // LOG画面が開いている間は、他の操作は一切せずスクロール操作専用に
+      // する。スクロールバーのつまみを掴んだ場合はそれ専用のドラッグ
+      // （dragMode="log-scrollbar"、動かしてもタップ扱いにはならず閉じない）、
+      // それ以外の場所を掴んだ場合はログ全体のドラッグでスクロールし、
+      // 動かさずタップしたら閉じる（dragMode="log-scroll"）。
+      if (logOverlayOpen) {
+        if (hitLogScrollbarHandle(pos)) {
+          const geo = getLogScrollGeometry();
+          logScrollbarDragStartClientY = evt.clientY;
+          logScrollbarDragStartScrollTop = geo.scrollTop;
+          logScrollbarDragGeo = geo;
+          dragMode = "log-scrollbar";
+          canvas.setPointerCapture(evt.pointerId);
+          return;
+        }
+        logDragStartClientY = evt.clientY;
+        logDragStartScroll = logScrollOffset;
+        logDragMoved = false;
+        dragMode = "log-scroll";
+        canvas.setPointerCapture(evt.pointerId);
+        return;
+      }
+
       // 選択肢・SKIPなど、実際に何が起きるかに関わらず、再生中に受け付ける
       // クリック/タップには必ずその位置へ演出を出す（本家のタップ演出と
       // 同じ感覚——「押した場所が分かる」フィードバック自体が目的のため）
@@ -3004,6 +3109,20 @@
       // その場で切り替えられる（選択肢表示中も含む）
       if (state.showButtons && state.showAuto && hitAutoIcon(pos)) {
         setScenarioAdvanceMode(state.scenarioAdvanceMode === "auto" ? "manual" : "auto");
+        return;
+      }
+
+      // LOGボタンは進行方式や選択肢の有無に関わらずいつでも開ける
+      // （SKIP/AUTOと同じ優先度）。閉じるのは上のlogOverlayOpen分岐
+      // （タップで閉じる）側で行う。
+      if (state.showButtons && state.showLog && hitLogIcon(pos)) {
+        logOverlayOpen = true;
+        logScrollOffset = 0; // 開いた直後は必ず最新（一番下）から見せる
+        pauseAutoAdvanceForLog();
+        // renderAll()は呼ばない——再生中はtick()が既に毎フレーム
+        // drawLogOverlay込みで描画し続けているので、ここで呼ぶと
+        // drawLogOverlayを含まない別系統の描画がtick()と競合して
+        // 一瞬ログが消えるちらつきの原因になる（下の関連箇所も同様）。
         return;
       }
 
@@ -3110,6 +3229,38 @@
 
   canvas.addEventListener("pointermove", (evt) => {
     if (!dragMode) return;
+
+    if (dragMode === "log-scrollbar") {
+      const rect = canvas.getBoundingClientRect();
+      const scaleY = canvas.height / rect.height;
+      const dyCanvas = (evt.clientY - logScrollbarDragStartClientY) * scaleY;
+      const geo = logScrollbarDragGeo;
+      const trackRange = geo.viewHeight - geo.handleHeight; // つまみが実際に動ける範囲(px)
+      // つまみを1px動かすとログの中身は(全体の高さ/動ける範囲)pxぶん動く——
+      // 標準的なスクロールバーの比率換算
+      const dScrollTop = trackRange > 0 ? (dyCanvas / trackRange) * geo.maxScroll : 0;
+      const newScrollTop = Math.min(geo.maxScroll, Math.max(0, logScrollbarDragStartScrollTop + dScrollTop));
+      logScrollOffset = geo.maxScroll - newScrollTop;
+      // ここでもrenderAll()は呼ばない（理由は開閉部分のコメント参照）。
+      // 再生中のtick()ループが次フレームで最新のlogScrollOffsetを
+      // 自然に反映してくれる。
+      return;
+    }
+
+    if (dragMode === "log-scroll") {
+      const dy = evt.clientY - logDragStartClientY;
+      if (Math.abs(dy) > LOG_TAP_THRESHOLD_PX) logDragMoved = true;
+      // clientY（CSSピクセル）からキャンバス座標系への比率はgetCanvasPosと同じ
+      const rect = canvas.getBoundingClientRect();
+      const scaleY = canvas.height / rect.height;
+      // 指/カーソルを下に動かす（dy>0）と、紙を引き下げるように過去の内容が
+      // 下からせり出してくる（logScrollOffsetが増える＝上＝過去へ）のが
+      // タッチスクロールの自然な感覚に合う
+      logScrollOffset = clampLogScroll(logDragStartScroll + dy * scaleY);
+      // renderAll()は呼ばない——tick()ループが毎フレーム描画済み
+      return;
+    }
+
     const pos = getCanvasPos(evt);
 
     if (dragMode === "bg-pan") {
@@ -3195,6 +3346,36 @@
 
   function endDrag(evt) {
     if (!dragMode) return;
+    if (dragMode === "log-scrollbar") {
+      // つまみの明示的なドラッグ操作なので、動かした量に関わらずログを
+      // 閉じたりはしない
+      dragMode = null;
+      logScrollbarDragGeo = null;
+      try {
+        canvas.releasePointerCapture(evt.pointerId);
+      } catch (e) {
+        /* 何もしない */
+      }
+      // renderAll()は呼ばない——再生中のtick()ループが毎フレーム
+      // drawLogOverlay込みで描画しているので不要（呼ぶとtick()の描画と
+      // 競合して一瞬ログが消えるちらつきの原因になる）
+      return;
+    }
+    if (dragMode === "log-scroll") {
+      // ほとんど動かさずに離した＝スクロールではなくタップ——LOG画面を閉じる
+      if (!logDragMoved) {
+        logOverlayOpen = false;
+        resumeAutoAdvanceAfterLog();
+      }
+      dragMode = null;
+      try {
+        canvas.releasePointerCapture(evt.pointerId);
+      } catch (e) {
+        /* 何もしない */
+      }
+      // renderAll()は呼ばない（理由は直前の分岐のコメント参照）
+      return;
+    }
     dragMode = null;
     dragBg = null;
     snapGuideX = null;
@@ -3210,6 +3391,20 @@
   }
   canvas.addEventListener("pointerup", endDrag);
   canvas.addEventListener("pointercancel", endDrag);
+
+  // LOG画面が開いている間だけ、マウスホイールでもスクロールできるように
+  // する（タッチのドラッグスクロールはpointerdown/pointermove側で対応）
+  canvas.addEventListener(
+    "wheel",
+    (evt) => {
+      if (!playback || !logOverlayOpen) return;
+      evt.preventDefault();
+      logScrollOffset = clampLogScroll(logScrollOffset - evt.deltaY);
+      // renderAll()は呼ばない——tick()ループが毎フレーム描画済み
+      // （呼ぶとtick()の描画と競合して一瞬ログが消えるちらつきの原因になる）
+    },
+    { passive: false }
+  );
 
   // ---------------- キャラクターリスト / エディタUI ----------------
   // エクスプローラー風のリネーム：単なるクリックは選択のみ（liの
@@ -3274,7 +3469,7 @@
             return;
           }
         }
-        charList.appendChild(node); // どの項目より下 — 末尾（最前面）へ
+        charList.appendChild(node); // どの項目より下 — 一覧の末尾（＝一番背面）へ
       };
       const onUp = () => {
         if (charDragId !== c.id) return;
@@ -3283,10 +3478,11 @@
         window.removeEventListener("pointermove", onMove);
         window.removeEventListener("pointerup", onUp);
         window.removeEventListener("pointercancel", onUp);
-        // 実際に並び替わったDOM順序を読み取ってstate.charactersへ反映する
-        // （配列の並び＝重なり順そのものなので、これだけで前面/背面が変わる）
+        // 実際に並び替わったDOM順序を読み取ってstate.charactersへ反映する。
+        // 一覧は最前面が一番上に来る表示なので（renderCharList参照）、
+        // DOM順とstate.characters順（奥→手前）は逆になる——比較を反転させる。
         const orderedIds = Array.from(charList.children).map((el) => Number(el.dataset.id));
-        state.characters.sort((a, b) => orderedIds.indexOf(a.id) - orderedIds.indexOf(b.id));
+        state.characters.sort((a, b) => orderedIds.indexOf(b.id) - orderedIds.indexOf(a.id));
         renderCharList();
         renderCharEditor();
         syncSpeakerFromFrontChar();
@@ -3301,7 +3497,11 @@
   function renderCharList() {
     charList.innerHTML = "";
     const frontIndex = resolveFrontIndex();
-    state.characters.forEach((c, i) => {
+    // state.charactersは奥→手前の順だが、一覧は最前面が直感的に分かる
+    // よう一番上に表示したいので、逆順（手前→奥）に辿ってappendする
+    // （配列自体・indexの意味は変えない——見た目の並びだけを反転させる）
+    for (let i = state.characters.length - 1; i >= 0; i--) {
+      const c = state.characters[i];
       const node = charItemTemplate.content.firstElementChild.cloneNode(true);
       node.dataset.id = String(c.id);
       node.querySelector("img").src = c.img.src;
@@ -3339,7 +3539,7 @@
       });
       wireCharDragHandle(node, c);
       charList.appendChild(node);
-    });
+    }
     charCount.textContent = state.characters.length + "/" + MAX_CHARACTERS;
     charAddLabel.style.opacity = state.characters.length >= MAX_CHARACTERS ? "0.4" : "1";
     charInput.disabled = state.characters.length >= MAX_CHARACTERS;
@@ -5700,6 +5900,319 @@
   // ---------------- シナリオ再生・録画 ----------------
   const VIDEO_MIME_CANDIDATES = ["video/webm;codecs=vp9", "video/webm;codecs=vp8", "video/webm"];
 
+  // ---- LOGボタンの履歴画面 ----
+  // 再生セッション中に表示された台詞・選ばれた選択肢を、退去演出・特殊行を
+  // 除いて順番に記録しておく（goToScenarioLine・updateChoiceAnim参照）。
+  // プロジェクトには保存せず、再生を開始するたびに空にする。fontSize/
+  // textColorは表示当時の値をそのまま保持し、ログでも実際の台詞と同じ
+  // 見た目（文字サイズ・色のグラデーション・ルビ・強調の点）で再現する。
+  let dialogueLog = [];
+  // 台詞: { type: "dialogue", speaker: string|null, body: string, fontSize: number, textColor: string }
+  // 選択肢: { type: "choice", body: string } — 選ばれた方だけを記録する（表示は赤固定）
+  // 空行: { type: "blank" } — 台詞を伴わないシーン（退去演出・場面転換等）の目印
+  let logOverlayOpen = false;
+  let logScrollOffset = 0; // 0=一番下（最新）。増えるほど上（過去）へスクロールした状態
+  let logDragStartClientY = 0;
+  let logDragStartScroll = 0;
+  let logDragMoved = false;
+  // スクロールバーのつまみ自体をドラッグしている間の状態
+  let logScrollbarDragStartClientY = 0;
+  let logScrollbarDragStartScrollTop = 0;
+  let logScrollbarDragGeo = null; // ドラッグ開始時点のgetLogScrollGeometry()結果（トラック寸法の基準に使う）
+
+  // 左右非対称のマージン——文章側は左に寄せたいので狭く、右側はスクロール
+  // バーをゆったり置けるだけの余白を確保する
+  const LOG_MARGIN_LEFT = 55;
+  const LOG_MARGIN_RIGHT = 100;
+  const LOG_MARGIN_TOP = 70;
+  const LOG_MARGIN_BOTTOM = 70;
+  const LOG_ENTRY_GAP = 24;
+  const LOG_INDENT = "　"; // 1段の字下げに使う全角スペース1つ
+  const LOG_CHOICE_LABEL_COLOR = "#ff0000"; // 純粋な赤——makeTextGradient経由で他の文字と同じ手法の陰影が付く
+  const LOG_TAP_THRESHOLD_PX = 6; // これ未満の移動量なら「ドラッグ」ではなく「タップ」扱い
+  const LOG_BLANK_LINE_HEIGHT = Math.round(NAME_FONT_SIZE * 1.6); // 台詞を挟まない行の代わりに入れる空行1つ分の高さ
+  // スクロールバーは、細いトラック（レール）の上に、それより幅の広い
+  // つまみ（scroll.png）を中心線を揃えて重ねる——つまみがトラックから
+  // 左右にはみ出す大きめのデザインにするため、幅を2種類持つ。
+  const LOG_SCROLLBAR_TRACK_WIDTH = 18;
+  const LOG_SCROLLBAR_WIDTH = 84; // つまみの幅（トラックより広く、はみ出す）
+  const LOG_SCROLLBAR_GAP_FROM_TEXT = 24; // 本文の右端からスクロールバー（トラック）までの間隔
+  const LOG_SCROLLBAR_TRACK_X = CANVAS_W - LOG_MARGIN_RIGHT + LOG_SCROLLBAR_GAP_FROM_TEXT;
+  // つまみはトラックと中心線が揃うように、左右均等にはみ出させて配置する
+  const LOG_SCROLLBAR_X = LOG_SCROLLBAR_TRACK_X + LOG_SCROLLBAR_TRACK_WIDTH / 2 - LOG_SCROLLBAR_WIDTH / 2;
+  const LOG_SCROLLBAR_MIN_HANDLE_HEIGHT = 110; // 掴みやすさのための最小の長さ（scroll.pngの先端2つ分は超える値にする）
+
+  // 退去演出・場面転換など、台詞を伴わないシーンがあったことをログ上でも
+  // 分かるように、空行を1つ挟む。連続しても積み上がらないよう、直前が
+  // 既に空行ならもう追加しない（何行分の空白かは区別せず、まとめて1つ）。
+  function pushBlankLogEntry() {
+    if (dialogueLog.length > 0 && dialogueLog[dialogueLog.length - 1].type === "blank") return;
+    dialogueLog.push({ type: "blank" });
+  }
+
+  // 折り返した2行目以降が、1行目の「（かぎ括弧）の直後にある本文の頭」と
+  // 揃うように、hangingIndent（「の見た目の幅）分だけ2行目以降を追加で
+  // 右へずらしてブロックを積む共通ヘルパー。
+  function pushLogTextBlock(context, blocks, paragraphs, fontSize, color, x, wrapWidth, hangingIndent, y) {
+    const lines = layoutBodyLines(context, paragraphs, wrapWidth, fontSize);
+    const lineHeight = Math.round(fontSize * 1.6);
+    const height = lines.length * lineHeight;
+    blocks.push({ lines, x, hangingIndent: hangingIndent || 0, y, height, fontSize, color });
+    return height;
+  }
+
+  // dialogueLogを、実際に描画するブロックの配列へ展開する。台詞テキストと
+  // 全く同じlayoutBodyLines/renderBodyLines（ルビ・強調の点・文字色
+  // グラデーションに対応）を使い回すことで見た目を完全に一致させる。
+  //   ・名前欄あり: 名前（NAME_FONT_SIZE/NAME_TEXT_COLOR固定） →
+  //     1段字下げ+「本文」（その行のfontSize/textColor、2行目以降は
+  //     「の幅ぶん追加で字下げして本文の頭と揃える）
+  //   ・名前欄なし: 本文をそのまま（括弧・名前・字下げ無し）
+  //   ・選択肢: 1段字下げの赤字「Select」→2段字下げでその選択肢自身の
+  //     色・CHOICE_FONT_SIZEの本文
+  function buildLogLayout(context) {
+    const maxWidth = CANVAS_W - LOG_MARGIN_LEFT - LOG_MARGIN_RIGHT;
+    const blocks = [];
+    let y = 0;
+    dialogueLog.forEach((entry, entryIdx) => {
+      if (entryIdx > 0) y += LOG_ENTRY_GAP;
+
+      if (entry.type === "blank") {
+        // 台詞を伴わないシーン（退去演出・場面転換等）があったことを示す
+        // だけの空行——描画するブロックは無く、高さだけを積む
+        y += LOG_BLANK_LINE_HEIGHT;
+        return;
+      }
+
+      if (entry.type === "choice") {
+        context.font = NAME_FONT_SIZE + "px " + bodyFontStack();
+        const indent1 = context.measureText(LOG_INDENT).width;
+        y += pushLogTextBlock(
+          context,
+          blocks,
+          [parseRubyParagraph("Select")],
+          NAME_FONT_SIZE,
+          LOG_CHOICE_LABEL_COLOR,
+          LOG_MARGIN_LEFT + indent1,
+          maxWidth - indent1,
+          0,
+          y
+        );
+
+        context.font = CHOICE_FONT_SIZE + "px " + bodyFontStack();
+        const indent2 = context.measureText(LOG_INDENT).width * 2;
+        y += pushLogTextBlock(
+          context,
+          blocks,
+          parseRubyText(entry.body),
+          CHOICE_FONT_SIZE,
+          LOG_CHOICE_LABEL_COLOR, // Selectラベルと同じ赤——選ばれた選択肢の文言もここでは赤で表示する
+          LOG_MARGIN_LEFT + indent2,
+          maxWidth - indent2,
+          0,
+          y
+        );
+        return;
+      }
+
+      if (entry.speaker) {
+        y += pushLogTextBlock(
+          context,
+          blocks,
+          [parseRubyParagraph(entry.speaker)],
+          NAME_FONT_SIZE,
+          NAME_TEXT_COLOR,
+          LOG_MARGIN_LEFT,
+          maxWidth,
+          0,
+          y
+        );
+
+        // 自前で追加した括弧はルビ記法ではないので、ただのtext runとして
+        // 前後に足すだけで、既存のレイアウト/描画にそのまま乗る
+        const paragraphs = parseRubyText(entry.body);
+        paragraphs[0] = [{ type: "text", ch: "「" }, ...paragraphs[0]];
+        const lastIdx = paragraphs.length - 1;
+        paragraphs[lastIdx] = [...paragraphs[lastIdx], { type: "text", ch: "」" }];
+
+        context.font = entry.fontSize + "px " + bodyFontStack();
+        const indentWidth = context.measureText(LOG_INDENT).width;
+        const bracketWidth = context.measureText("「").width;
+        y += pushLogTextBlock(
+          context,
+          blocks,
+          paragraphs,
+          entry.fontSize,
+          entry.textColor,
+          LOG_MARGIN_LEFT + indentWidth,
+          maxWidth - indentWidth,
+          bracketWidth,
+          y
+        );
+      } else {
+        y += pushLogTextBlock(
+          context,
+          blocks,
+          parseRubyText(entry.body),
+          entry.fontSize,
+          entry.textColor,
+          LOG_MARGIN_LEFT,
+          maxWidth,
+          0,
+          y
+        );
+      }
+    });
+    return { blocks, totalHeight: y };
+  }
+
+  // buildLogLayoutは全エントリぶんのルビ解析/折り返し計算をやり直す
+  // ため、スクロール中（pointermove・wheelのたびに何度も呼ばれる）に
+  // 毎回丸ごと計算し直すとログが長いほど重くなり、操作がガタつく原因に
+  // なる。ログの中身（dialogueLog）は再生中に行が進んだ時だけ増える
+  // ものなので、その時だけ作り直せば十分——件数が変わっていなければ
+  // 前回の結果をそのまま使い回す。
+  let logLayoutCache = null; // { forCount, blocks, totalHeight }
+  function getLogLayout() {
+    if (!logLayoutCache || logLayoutCache.forCount !== dialogueLog.length) {
+      const { blocks, totalHeight } = buildLogLayout(ctx);
+      logLayoutCache = { forCount: dialogueLog.length, blocks, totalHeight };
+    }
+    return logLayoutCache;
+  }
+
+  // logScrollOffset（0=一番下）を、実際にスクロールできる範囲にクランプする
+  function clampLogScroll(offset) {
+    const viewHeight = CANVAS_H - LOG_MARGIN_TOP - LOG_MARGIN_BOTTOM;
+    const { totalHeight } = getLogLayout();
+    const maxScroll = Math.max(0, totalHeight - viewHeight);
+    return Math.min(maxScroll, Math.max(0, offset));
+  }
+
+  // LOGのスクロール量・スクロールバーの寸法をまとめて計算する（描画・
+  // つまみの当たり判定・ドラッグ操作のすべてから参照する共通の基準）。
+  // 呼ぶたびにlogScrollOffset自体も有効範囲へクランプする。
+  // つまみの長さは表示割合（viewHeight/totalHeight）に比例させ、掴みやすい
+  // 最小長は下回らないようにする——ログが一画面に収まる場合はトラック
+  // 全体を覆う長さになる。
+  function getLogScrollGeometry() {
+    const viewTop = LOG_MARGIN_TOP;
+    const viewHeight = CANVAS_H - LOG_MARGIN_TOP - LOG_MARGIN_BOTTOM;
+    const { totalHeight } = getLogLayout();
+    const maxScroll = Math.max(0, totalHeight - viewHeight);
+    logScrollOffset = Math.min(maxScroll, Math.max(0, logScrollOffset));
+    const rawHandleHeight = totalHeight > viewHeight ? viewHeight * (viewHeight / totalHeight) : viewHeight;
+    const handleHeight = Math.min(viewHeight, Math.max(LOG_SCROLLBAR_MIN_HANDLE_HEIGHT, rawHandleHeight));
+    const scrollTop = maxScroll - logScrollOffset; // 0=先頭（最古）が見える位置
+    const handleY = maxScroll > 0 ? viewTop + (scrollTop / maxScroll) * (viewHeight - handleHeight) : viewTop;
+    return { viewTop, viewHeight, totalHeight, maxScroll, handleHeight, handleY, scrollTop };
+  }
+
+  // pos（キャンバス座標）がスクロールバーのつまみの上かどうか
+  function hitLogScrollbarHandle(pos) {
+    if (!logOverlayOpen) return false;
+    const geo = getLogScrollGeometry();
+    if (geo.maxScroll <= 0) return false; // 1画面に収まりスクロールバー自体を表示していない
+    return (
+      pos.x >= LOG_SCROLLBAR_X &&
+      pos.x <= LOG_SCROLLBAR_X + LOG_SCROLLBAR_WIDTH &&
+      pos.y >= geo.handleY &&
+      pos.y <= geo.handleY + geo.handleHeight
+    );
+  }
+
+  // LOGボタンで開く履歴画面——SKIPボタンを含むUI全体より手前（最後）に
+  // 描画する。drawScene本体には含めず、ライブプレビュー専用（録画・GIF
+  // 書き出しには焼き込まない——drawEditorOverlayと同じ扱い）。
+  function drawLogOverlay(context) {
+    if (!logOverlayOpen) return;
+    context.save();
+    context.fillStyle = "rgba(0, 0, 0, 0.82)";
+    context.fillRect(0, 0, CANVAS_W, CANVAS_H);
+
+    const { blocks } = getLogLayout();
+
+    if (blocks.length === 0) {
+      context.fillStyle = "rgba(255, 255, 255, 0.6)";
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.font = "28px " + bodyFontStack();
+      context.fillText("まだ記録がありません", CANVAS_W / 2, CANVAS_H / 2);
+      context.restore();
+      return;
+    }
+
+    const geo = getLogScrollGeometry();
+    const viewTop = geo.viewTop;
+
+    // クリップ領域は表示枠（viewTop〜viewTop+viewHeight）ではなく、キャンバス
+    // 全体の縦幅にする——こうすると文字は上下の余白の途中で唐突に切れず、
+    // 画面（キャンバス）の外に完全に出た時だけ見えなくなる。
+    context.save();
+    context.beginPath();
+    context.rect(LOG_MARGIN_LEFT, 0, CANVAS_W - LOG_MARGIN_LEFT - LOG_MARGIN_RIGHT, CANVAS_H);
+    context.clip();
+    blocks.forEach((block) => {
+      const blockTop = viewTop + (block.y - geo.scrollTop);
+      if (blockTop + block.height < 0 || blockTop > CANVAS_H) return; // キャンバス外は描かない
+      if (block.hangingIndent > 0 && block.lines.length > 1) {
+        // 2行目以降だけ、かぎ括弧の幅ぶん追加でずらして本文の頭と揃える
+        const lineHeight = Math.round(block.fontSize * 1.6);
+        block.lines.forEach((line, i) => {
+          const lineX = i === 0 ? block.x : block.x + block.hangingIndent;
+          renderBodyLines(context, [line], lineX, blockTop + i * lineHeight, block.fontSize, block.color);
+        });
+      } else {
+        renderBodyLines(context, block.lines, block.x, blockTop, block.fontSize, block.color);
+      }
+    });
+    context.restore();
+
+    // スクロールバー——黒背景＋白縁取りの半透明トラックの上に、scroll.pngを
+    // 縦方向に伸縮させたつまみを重ねる。ログの長さに応じてつまみの長さ・
+    // 位置が変わる（getLogScrollGeometry参照）。1画面に収まりスクロールの
+    // 必要が無いとき（maxScroll===0）は、操作しようがないスクロールバー
+    // 自体を表示しない。
+    if (assets.scroll && geo.maxScroll > 0) {
+      context.save();
+      context.fillStyle = "rgba(0, 0, 0, 0.1)";
+      context.fillRect(LOG_SCROLLBAR_TRACK_X, viewTop, LOG_SCROLLBAR_TRACK_WIDTH, geo.viewHeight);
+      context.strokeStyle = "rgba(255, 255, 255, 0.5)";
+      context.lineWidth = 2;
+      context.strokeRect(LOG_SCROLLBAR_TRACK_X, viewTop, LOG_SCROLLBAR_TRACK_WIDTH, geo.viewHeight);
+      drawScrollHandle(context, assets.scroll, LOG_SCROLLBAR_X, geo.handleY, LOG_SCROLLBAR_WIDTH, geo.handleHeight);
+      context.restore();
+    }
+
+    context.restore();
+  }
+
+  // LOG画面を開いている間、裏でAUTO進行のタイマーが動いたまま次の行へ
+  // 進んでしまうと、閉じたときに読んでいた場面が飛んでしまう。開く瞬間に
+  // 保留中のタイマーを止め、閉じる瞬間に（読み終えていれば）フルの待ち
+  // 秒数からタイマーを張り直す——厳密な残り時間の復元はしない、単純な仕様。
+  function pauseAutoAdvanceForLog() {
+    if (!playback) return;
+    if (playback.timerId) {
+      clearTimeout(playback.timerId);
+      playback.timerId = null;
+      playback.logResumeAutoAdvance = true;
+    }
+  }
+
+  function resumeAutoAdvanceAfterLog() {
+    if (!playback || !playback.logResumeAutoAdvance) return;
+    playback.logResumeAutoAdvance = false;
+    if (
+      state.scenarioAdvanceMode === "auto" &&
+      playback.currentLine &&
+      !playback.currentLine.showChoices &&
+      (!dialogueAnim || dialogueAnim.phase === "holding")
+    ) {
+      playback.timerId = setTimeout(() => advanceScenarioPlayback(), Math.max(0.1, state.scenarioAutoDelaySec) * 1000);
+    }
+  }
+
   // セリフのタイプライター表示＋退出スライドの状態機械。シナリオ再生中
   // だけ使う実行時オブジェクト（プロジェクトには保存しない）。
   // { phase: "typing"|"holding"|"exiting", lines, totalRuns, revealedRuns,
@@ -5824,6 +6337,16 @@
     if (!choiceAnim || choiceAnim.phase !== "exiting") return;
     const elapsed = performance.now() - choiceAnim.startTime;
     if (elapsed - CHOICE_SELECTED_FADE_DELAY_MS >= CHOICE_FADE_MS + CHOICE_POST_FADE_DELAY_MS) {
+      // LOGボタンの履歴には、選ばれた方の選択肢だけを記録する
+      // （表示は常に赤固定——buildLogLayout参照）
+      const line = playback && playback.currentLine;
+      if (line && line.showChoices && typeof choiceAnim.selectedIdx === "number") {
+        const texts = [line.choice1, line.choice2, line.choice3];
+        const text = texts[choiceAnim.selectedIdx];
+        if (text && text.trim()) {
+          dialogueLog.push({ type: "choice", body: text });
+        }
+      }
       choiceAnim = null;
       advanceScenarioPlayback();
     }
@@ -6138,6 +6661,7 @@
       const preloadableNextLine =
         nextLine && !nextLine.isStartingFade && !nextLine.isEndingFade && !nextLine.isSceneTransition ? nextLine : null;
       beginSceneTransitionAnim(preloadableNextLine);
+      pushBlankLogEntry(); // 台詞を挟まない場面転換があったことをログ上でも分かるようにする
       renderAll();
       return;
     }
@@ -6164,6 +6688,7 @@
         // フォールバック——通常行と同様すぐ次へ進める
         advanceScenarioPlayback();
       }
+      pushBlankLogEntry(); // 台詞を挟まない退去演出があったことをログ上でも分かるようにする
       renderAll();
       return;
     }
@@ -6185,6 +6710,23 @@
       // 自動進行の待ちタイマーは、タイプライター表示が完了してから
       // onDialogueFullyRevealedが張る（表示中に秒数を消費させないため）
       playback.pendingAutoAdvance = state.scenarioAdvanceMode === "auto" ? state.scenarioAutoDelaySec : null;
+      // LOGボタンの履歴にも記録する（選択肢・退去演出の行はここに来ないので
+      // 自然に除外される）。本文が空の行（「新規シーンを追加」の空のシーン
+      // 等）は台詞として記録する意味が無いので、代わりに空行を挟む。
+      // fontSize/textColorはapplyScenarioLine(line)で既にstateへ反映済みの
+      // 値を使う——これにより、この機能追加より前の古い行でも常にその時の
+      // 実際の表示値（フォールバック込み）が記録される。
+      if (line.body && line.body.trim()) {
+        dialogueLog.push({
+          type: "dialogue",
+          speaker: line.nameplateOn !== false ? line.speaker : null,
+          body: line.body,
+          fontSize: state.fontSize,
+          textColor: state.textColor,
+        });
+      } else {
+        pushBlankLogEntry();
+      }
       // 同じキャラクターが続けて喋る場合（間に選択肢行が挟まった場合を
       // 含む——選択肢行ではdialogueAnimに触れないため凍結前の話者のまま
       // 残る）のみ退出スライドを再生する。話者が変わる場合は前の文字列を
@@ -6229,6 +6771,8 @@
       slot.video.pause();
       slot.active = false;
     });
+    // 開いたままだったLOG画面も後片付けする
+    logOverlayOpen = false;
     // フェードの途中で再生が終わった場合、通常編集に戻った時に中途半端な
     // 不透明度のまま固まって見えないよう、進行中のフェードを打ち切る
     // （c.opacity/c.visibleは既にそれぞれの行の目標値になっているので、
@@ -6292,6 +6836,10 @@
     // ここで読み込みを始めておく——開始演出（暗転）が明けるまでの間に
     // デコードの準備が済むので、最初のタップから遅延なく表示できる
     ensureTapEffectPool();
+    // LOGの履歴も、再生開始のたびにこのセッション分だけを新しく記録し直す
+    dialogueLog = [];
+    logOverlayOpen = false;
+    logScrollOffset = 0;
 
     if (mode === "record" || mode === "gif") {
       // 録画・GIFキャプチャ専用のオフスクリーンcanvasにdrawSceneだけを
@@ -6402,6 +6950,7 @@
       drawStartingFadeOverlay(ctx);
       drawEndingFadeOverlay(ctx);
       drawSceneTransitionOverlay(ctx);
+      drawLogOverlay(ctx); // ライブプレビュー専用——録画/GIF書き出しには焼き込まない
       if (playback.offscreenCtx) {
         drawScene(playback.offscreenCtx);
         drawStartingFadeOverlay(playback.offscreenCtx);

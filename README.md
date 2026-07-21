@@ -60,6 +60,7 @@ fgo-scene-maker/
 │   ├─ tap.mp4              … 手動進行でタップ/クリックした位置に出す演出
 │   ├─ skip_button.png      … SKIPボタン
 │   ├─ log_button.png / auto_button.png / next.png … 右下のミニアイコン
+│   ├─ scroll.png           … LOGログのスクロールバーのつまみ
 │   └─ favicon.png          … ブラウザタブ用アイコン
 └─ fonts/
     └─ GenEiLateMinN_v2.woff2   … セリフ用フォント

@@ -28,6 +28,7 @@ IMAGE_FILES = {
     "log": "log_button.png",
     "auto": "auto_button.png",
     "next": "next.png",
+    "scroll": "scroll.png",
 }
 
 VIDEO_FILES = {
