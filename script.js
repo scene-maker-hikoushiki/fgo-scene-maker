@@ -6880,10 +6880,12 @@
       if (Number.isNaN(n)) return;
       n = Math.min(getMax(), Math.max(min, n));
       servantStatus[statusKey] = n;
-      // 上限でクランプした場合、入力欄の表示もその場で追従させる——blurまで
-      // 待つと、上限を超えて入力し続けても見た目が伸び続けて制限が
-      // かかっていないように見えてしまう。
-      if (Number(raw) !== n) e.target.value = n;
+      // 入力中は表示欄の値を書き換えない——例えばmaxLevel(min:10)を
+      // 120から99へ打ち直そうとすると、1桁目を入力した時点（例:"9"）で
+      // min未満と判定されて即座に"10"へ強制補正され、続けて2桁目を
+      // 打っても意図した数値に戻せなくなる不具合があったため。実際の値は
+      // servantStatusに反映済みなのでプレビューはこの時点で更新され、
+      // 表示欄の補正はblur時（入力確定時）にまとめて行う。
       renderAll();
     });
     input.addEventListener("blur", (e) => {
