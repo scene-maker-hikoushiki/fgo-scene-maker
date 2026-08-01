@@ -11,6 +11,45 @@
 
 <div class="app">
 
+  <!-- サーヴァント詳細タブの間だけ表示するフローティングツールバー——
+       スキル/宝具の効果説明でよく使う定型表記を、フォーカス中の説明欄の
+       カーソル位置へワンボタンで挿し込む。position:fixedなので.appの
+       フレックスレイアウトには影響しない。 -->
+  <div class="template-toolbar is-hidden" id="servantTemplateToolbar">
+    <div class="template-toolbar__title">定型表記を挿入</div>
+
+    <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn" id="templateBtnTurn">(nターン)</button>
+      <input type="number" class="field__input field__input--number field__input--number-small" id="templateTurnInput" min="1" max="99" step="1" value="3">
+    </div>
+
+    <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn" id="templateBtnCount">(n回・nターン)</button>
+      <input type="number" class="field__input field__input--number field__input--number-small" id="templateCountInput" min="1" max="99" step="1" value="3">
+      <input type="number" class="field__input field__input--number field__input--number-small" id="templateCountTurnInput" min="1" max="99" step="1" value="3">
+    </div>
+
+    <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn" id="templateBtnLv">[Lv.n]</button>
+      <input type="number" class="field__input field__input--number field__input--number-small" id="templateLvInput" min="1" max="99" step="1" value="10">
+    </div>
+
+    <div class="template-toolbar__row template-toolbar__row--grid">
+      <button type="button" class="template-toolbar__btn" id="templateBtnAmp">＆</button>
+      <button type="button" class="template-toolbar__btn" id="templateBtnPlus">＋</button>
+    </div>
+    <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn template-toolbar__btn--wide" id="templateBtnOvercharge">&lt;オーバーチャージで効果アップ&gt;</button>
+    </div>
+    <div class="template-toolbar__row template-toolbar__row--grid">
+      <button type="button" class="template-toolbar__btn" id="templateBtnTrait">〔特性〕</button>
+      <button type="button" class="template-toolbar__btn" id="templateBtnDemerit">【デメリット】</button>
+    </div>
+    <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn" id="templateBtnMark">▲（強化箇所の目印）</button>
+    </div>
+  </div>
+
   <!-- ============ MAIN: CANVAS MONITOR ============ -->
   <main class="stage">
     <div class="stage__header">
@@ -27,6 +66,10 @@
       </div>
     </div>
 
+    <!-- キャンバス自体はモードに関わらず常に表示——中に描く内容（シナリオ
+         プレビュー / サーヴァント詳細）をJS側で切り替える。ヒント文言
+         （.stage__hint）はシナリオ専用の操作説明なので、サーヴァント詳細
+         タブの間だけ隠す。 -->
     <div class="monitor">
       <div class="monitor__corner monitor__corner--tl"></div>
       <div class="monitor__corner monitor__corner--tr"></div>
@@ -50,7 +93,13 @@
       <span class="console__sub">scene composer（非公式ファンメイドツール）</span>
     </div>
 
-    <div class="console__scroll">
+    <!-- ============ 画面切り替え（シナリオ / サーヴァント詳細） ============ -->
+    <nav class="mode-tabs" id="modeTabs">
+      <button type="button" class="mode-tab is-active" data-mode="scenario">シナリオ</button>
+      <button type="button" class="mode-tab" data-mode="servant">サーヴァント詳細</button>
+    </nav>
+
+    <div class="console__scroll" id="scenarioConsoleBody">
     <div class="console__body">
     <div class="console__col console__col--left">
 
@@ -351,61 +400,1111 @@
 
     </div>
 
+    <div class="console__scroll is-hidden" id="servantConsoleBody">
+    <div class="console__body">
+
+      <!-- 基本情報（名前・クラス） -->
+      <details class="panel" open>
+        <summary><h2 class="panel__title">基本情報</h2></summary>
+
+        <label class="field">
+          <span class="field__label">サーヴァント名</span>
+          <input type="text" id="servantNameInput" class="field__input" placeholder="サーヴァント名" maxlength="60">
+        </label>
+
+        <!-- 通常は上部表示・セイントグラフ表示とも同じサーヴァント名を
+             使うが、ONにするとセイントグラフ側だけ別の文字列を指定できる
+             （偽名を騙る霊基など、見た目の名前と実際の名前が違うケースの
+             再現用）。 -->
+        <label class="switch-row" style="margin: 14px 0 0 0; padding: 6px 0;">
+          <span>セイントグラフの名前を個別に指定</span>
+          <span class="switch">
+            <input type="checkbox" id="servantGraphNameOverrideToggle">
+            <span class="switch__track"></span>
+          </span>
+        </label>
+        <label class="field is-hidden" id="servantGraphNameField">
+          <span class="field__label">セイントグラフ表示用の名前</span>
+          <input type="text" id="servantGraphNameInput" class="field__input" placeholder="セイントグラフに表示する名前" maxlength="60">
+        </label>
+
+        <label class="field">
+          <span class="field__label">クラス</span>
+          <select id="servantClassSelect" class="field__input"><!-- JS populates --></select>
+        </label>
+
+        <label class="field is-hidden" id="servantCustomClassField">
+          <span class="field__label">クラス名（自由入力・上部表示用）</span>
+          <input type="text" id="servantCustomClassNameInput" class="field__input" placeholder="クラス名を入力" maxlength="30">
+        </label>
+
+        <label class="field is-hidden" id="servantCustomClassEnField">
+          <span class="field__label">クラス名（英語表記・セイントグラフ用）</span>
+          <input type="text" id="servantCustomClassNameEnInput" class="field__input" placeholder="例: Original" maxlength="30">
+        </label>
+
+        <div style="display:flex; gap:6px; margin-top:12px;">
+          <label class="filebtn" id="servantCustomClassIconLabel" style="flex:1; margin:0;">
+            <input type="file" id="servantCustomClassIconInput" accept="image/*" hidden>
+            <span>クラスアイコン画像を選択</span>
+          </label>
+          <button type="button" class="btn btn--sm btn--danger" id="servantCustomClassIconClearBtn" style="flex:1;">アップロード画像を解除</button>
+        </div>
+
+        <!-- ここから下2つは、クラスアイコンが「アップロードした画像」の
+             時だけ効く調整項目（クラス別の既定アイコンには影響しない）。 -->
+        <label class="field" style="margin-top:10px;">
+          <span class="field__label">クラスアイコンの拡大率（アップロード画像のみ）</span>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="range" id="servantCustomClassIconScaleInput" min="30" max="300" value="100" style="flex: 1;">
+            <input type="number" id="servantCustomClassIconScaleNumber" min="30" max="300" value="100" class="field__input field__input--number field__input--number-small">
+          </div>
+        </label>
+
+        <label class="switch-row" style="margin-top:8px;">
+          <span>フレーム色で塗りつぶす（アップロード画像のみ）</span>
+          <span class="switch">
+            <input type="checkbox" id="servantCustomClassIconFillToggle" checked>
+            <span class="switch__track"></span>
+          </span>
+        </label>
+
+        <div class="panel__divider"></div>
+
+        <!-- セイントグラフフレーム（金/銀/銅/黒の4種類＋ユーザー追加分）。
+             実際の見た目を見ながら選べるよう、横スクロールのサムネイル
+             一覧にする。 -->
+        <span class="field__label">セイントグラフフレーム（885×1512）</span>
+        <div class="frame-select" id="servantSaintGraphFrameSelect"><!-- JS populates --></div>
+        <label class="filebtn" id="servantSaintGraphFrameAddLabel" style="margin-top:6px;">
+          <input type="file" id="servantSaintGraphFrameAddInput" accept="image/*" hidden>
+          <span>フレーム画像を追加</span>
+        </label>
+
+        <label class="field" style="margin-top:8px;">
+          <span class="field__label">レアリティ（星の数）</span>
+          <select id="servantRaritySelect" class="field__input"><!-- JS populates --></select>
+        </label>
+
+        <div class="panel__divider"></div>
+
+        <!-- セイントグラフ画像。フレームからはみ出せないようクリップし、
+             複数枚を重ねて表示できる。キャンバス上でクリックして選択
+             すると、ドラッグで移動・四隅のハンドルで拡縮できる
+             （立ち絵と同じ操作感）。 -->
+        <span class="field__label">セイントグラフ画像（霊基再臨4段階）</span>
+        <p class="field__hint" style="margin: 2px 0 8px;">タブ、またはキャンバス上のセイントグラフ左右の矢印で、画像を編集する再臨段階を切り替えられます。</p>
+        <div class="mode-tabs" id="servantGraphAscensionTabs" style="padding: 0; border-bottom: none; margin: 0 0 10px;"><!-- JS populates --></div>
+        <span class="field__label" id="servantGraphAscensionLabel">編集中: 第一再臨</span>
+        <label class="filebtn" id="servantGraphImageAddLabel" style="margin-top:8px;">
+          <input type="file" id="servantGraphImageInput" accept="image/*" multiple hidden>
+          <span>画像を追加</span>
+        </label>
+        <ul class="charlist" id="servantGraphImageList"><!-- JS populates --></ul>
+
+        <!-- キャンバス上で選択中の画像のX/Y/拡大率——ドラッグ操作の代わりに
+             数値でも調整できるようにする。何も選択していない間は操作不可。 -->
+        <div id="servantGraphPositionControls">
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">X（横位置）</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantGraphXInput" min="0" max="1600" value="0" style="flex: 1;">
+              <input type="number" id="servantGraphXNumber" min="0" max="1600" value="0" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+          <label class="field">
+            <span class="field__label">Y（縦位置）</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantGraphYInput" min="0" max="900" value="0" style="flex: 1;">
+              <input type="number" id="servantGraphYNumber" min="0" max="900" value="0" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+          <label class="field">
+            <span class="field__label">拡大率（%）</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantGraphScaleInput" min="2" max="1000" value="100" style="flex: 1;">
+              <input type="number" id="servantGraphScaleNumber" min="2" max="1000" value="100" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+        </div>
+      </details>
+
+      <!-- ステータス（キャンバス側の「ステータス」タブに対応する大枠）。
+           タブの中にはステータス/保有スキル/クラススキル/アペンドスキル/
+           宝具/コマンドカードの各ウインドウが並ぶ想定なので、その単位で
+           さらに折りたたみを分けている（今はステータスウインドウのみ）。 -->
+      <details class="panel" open>
+        <summary>
+          <h2 class="panel__title">ステータス</h2>
+          <button type="button" class="panel__inline-btn" id="servantTemplateToolbarToggleBtn">定型挿入</button>
+        </summary>
+
+        <details class="collapsible-sub" open>
+          <summary>ステータスウインドウ</summary>
+
+          <!-- 顔画像。正方形の枠に合わせて中央を切り抜いて表示する
+               （立ち絵/セイントグラフ画像と違い、1枚だけの単純な差し替え）。 -->
+          <label class="filebtn" id="servantFaceImageLabel" style="margin-bottom: 12px;">
+            <input type="file" id="servantFaceImageInput" accept="image/*" hidden>
+            <span>顔画像を選択</span>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">現在レベル</span>
+              <input type="number" id="servantCurrentLevelInput" class="field__input" min="1" max="120" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">最大レベル</span>
+              <input type="number" id="servantMaxLevelInput" class="field__input" min="10" max="120" step="1">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">再臨段階</span>
+              <input type="number" id="servantAscensionInput" class="field__input" min="1" max="4" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">COST</span>
+              <input type="number" id="servantCostInput" class="field__input" min="0" max="99" step="1">
+            </label>
+          </div>
+
+          <!-- 絆レベルのNEXTとは別の数値——次のレベルまでの必要経験値。
+               再臨段階アイコンの右、Lv.バーの下に表示する（表示/非表示切替可）。
+               現在の経験値は、Lv.横のバー（現在経験値/NEXTの必要経験値）の
+               算出にも使う——現在レベル/最大レベルの比率ではなく、経験値の
+               貯まり具合をバーに反映する。 -->
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">現在の経験値</span>
+              <input type="number" id="servantCurrentExpInput" class="field__input" min="0" max="999999999" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">次レベルまでの経験値</span>
+              <input type="number" id="servantNextLevelExpInput" class="field__input" min="0" max="99999999" step="1">
+            </label>
+          </div>
+          <label class="switch-row">
+            <span>NEXTを表示</span>
+            <span class="switch">
+              <input type="checkbox" id="servantNextLevelExpToggle" checked>
+              <span class="switch__track"></span>
+            </span>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">HP</span>
+              <input type="number" id="servantHpInput" class="field__input" min="1" max="99999" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">ATK</span>
+              <input type="number" id="servantAtkInput" class="field__input" min="1" max="99999" step="1">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">HP強化</span>
+              <input type="number" id="servantHpBonusInput" class="field__input" min="0" max="2000" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">ATK強化</span>
+              <input type="number" id="servantAtkBonusInput" class="field__input" min="0" max="2000" step="1">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">HP強化最大</span>
+              <select id="servantHpBonusMaxSelect" class="field__input">
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field__label">ATK強化最大</span>
+              <select id="servantAtkBonusMaxSelect" class="field__input">
+                <option value="1000">1000</option>
+                <option value="2000">2000</option>
+              </select>
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">宝具最大強化段階</span>
+              <input type="number" id="servantNpMaxLevelInput" class="field__input" min="0" max="4" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル最大強化段階</span>
+              <input type="number" id="servantSkillMaxLevelInput" class="field__input" min="0" max="4" step="1">
+            </label>
+          </div>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">絆レベル</span>
+              <input type="number" id="servantBondLevelInput" class="field__input" min="0" max="100" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">最大絆レベル</span>
+              <input type="number" id="servantBondLevelMaxInput" class="field__input" min="1" max="100" step="1">
+            </label>
+          </div>
+
+          <label class="field">
+            <span class="field__label">絆レベルアップまでの経験値）</span>
+            <input type="number" id="servantNextExpInput" class="field__input" min="0" max="99999999" step="1">
+          </label>
+        </details>
+
+        <details class="collapsible-sub">
+          <summary>保有スキルウインドウ</summary>
+
+          <div class="mode-tabs" id="servantSkillTabs" style="padding: 0; border-bottom: none; margin: 0 0 10px;">
+            <button type="button" class="mode-tab is-active" data-tab-index="0">SKILL 1</button>
+            <button type="button" class="mode-tab" data-tab-index="1">SKILL 2</button>
+            <button type="button" class="mode-tab" data-tab-index="2">SKILL 3</button>
+          </div>
+
+          <div class="tab-page" data-tab-page="0">
+            <label class="filebtn" id="servantSkill1IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantSkill1IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantSkill1NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">ランク</span>
+                <input type="text" id="servantSkill1RankSelect" class="field__input" list="servantSkillRankOptions" maxlength="20" placeholder="例: B+">
+              </label>
+              <label class="field">
+                <span class="field__label">スキルレベル</span>
+                <input type="number" id="servantSkill1LevelInput" class="field__input" min="0" max="10" step="1">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">チャージタイム</span>
+                <input type="number" id="servantSkill1ChargeInput" class="field__input" min="1" max="99" step="1">
+              </label>
+              <label class="field">
+                <span class="field__label">スキル強化段階</span>
+                <input type="number" id="servantSkill1UpgradeInput" class="field__input" min="0" max="4" step="1">
+              </label>
+            </div>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantSkill1DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="1" hidden>
+            <label class="filebtn" id="servantSkill2IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantSkill2IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantSkill2NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">ランク</span>
+                <input type="text" id="servantSkill2RankSelect" class="field__input" list="servantSkillRankOptions" maxlength="20" placeholder="例: B+">
+              </label>
+              <label class="field">
+                <span class="field__label">スキルレベル</span>
+                <input type="number" id="servantSkill2LevelInput" class="field__input" min="0" max="10" step="1">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">チャージタイム</span>
+                <input type="number" id="servantSkill2ChargeInput" class="field__input" min="1" max="99" step="1">
+              </label>
+              <label class="field">
+                <span class="field__label">スキル強化段階</span>
+                <input type="number" id="servantSkill2UpgradeInput" class="field__input" min="0" max="4" step="1">
+              </label>
+            </div>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantSkill2DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="2" hidden>
+            <label class="filebtn" id="servantSkill3IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantSkill3IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantSkill3NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">ランク</span>
+                <input type="text" id="servantSkill3RankSelect" class="field__input" list="servantSkillRankOptions" maxlength="20" placeholder="例: B+">
+              </label>
+              <label class="field">
+                <span class="field__label">スキルレベル</span>
+                <input type="number" id="servantSkill3LevelInput" class="field__input" min="0" max="10" step="1">
+              </label>
+            </div>
+            <div class="field-grid">
+              <label class="field">
+                <span class="field__label">チャージタイム</span>
+                <input type="number" id="servantSkill3ChargeInput" class="field__input" min="1" max="99" step="1">
+              </label>
+              <label class="field">
+                <span class="field__label">スキル強化段階</span>
+                <input type="number" id="servantSkill3UpgradeInput" class="field__input" min="0" max="4" step="1">
+              </label>
+            </div>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantSkill3DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+        </details>
+
+        <details class="collapsible-sub">
+          <summary>クラススキルウインドウ</summary>
+
+          <!-- クラススキルは保有スキルと違い数が決まっていないため、
+               1件ぶんのフィールドをテンプレートから複製して並べる
+               （追加/削除は下のボタン・各項目内の削除ボタンから）。 -->
+          <div id="servantClassSkillList"><!-- JS populates --></div>
+          <button type="button" class="btn btn--sm" id="servantClassSkillAddBtn" style="width:100%; margin-top:4px;">＋ クラススキルを追加</button>
+        </details>
+
+        <details class="collapsible-sub">
+          <summary>アペンドスキルウインドウ</summary>
+
+          <div class="mode-tabs" id="servantAppendSkillTabs" style="padding: 0; border-bottom: none; margin: 0 0 10px;">
+            <button type="button" class="mode-tab is-active" data-tab-index="0">SKILL 1</button>
+            <button type="button" class="mode-tab" data-tab-index="1">SKILL 2</button>
+            <button type="button" class="mode-tab" data-tab-index="2">SKILL 3</button>
+            <button type="button" class="mode-tab" data-tab-index="3">SKILL 4</button>
+            <button type="button" class="mode-tab" data-tab-index="4">SKILL 5</button>
+          </div>
+
+          <div class="tab-page" data-tab-page="0">
+            <label class="switch-row">
+              <span>SKILL 1 開放済み</span>
+              <span class="switch">
+                <input type="checkbox" id="servantAppendSkill1UnlockedToggle">
+                <span class="switch__track"></span>
+              </span>
+            </label>
+            <label class="filebtn" id="servantAppendSkill1IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantAppendSkill1IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantAppendSkill1NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <label class="field">
+              <span class="field__label">スキルレベル</span>
+              <input type="number" id="servantAppendSkill1LevelInput" class="field__input" min="0" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantAppendSkill1DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="1" hidden>
+            <label class="switch-row">
+              <span>SKILL 2 開放済み</span>
+              <span class="switch">
+                <input type="checkbox" id="servantAppendSkill2UnlockedToggle">
+                <span class="switch__track"></span>
+              </span>
+            </label>
+            <label class="filebtn" id="servantAppendSkill2IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantAppendSkill2IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantAppendSkill2NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <label class="field">
+              <span class="field__label">スキルレベル</span>
+              <input type="number" id="servantAppendSkill2LevelInput" class="field__input" min="0" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantAppendSkill2DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="2" hidden>
+            <label class="switch-row">
+              <span>SKILL 3 開放済み</span>
+              <span class="switch">
+                <input type="checkbox" id="servantAppendSkill3UnlockedToggle">
+                <span class="switch__track"></span>
+              </span>
+            </label>
+            <label class="filebtn" id="servantAppendSkill3IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantAppendSkill3IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantAppendSkill3NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <label class="field">
+              <span class="field__label">スキルレベル</span>
+              <input type="number" id="servantAppendSkill3LevelInput" class="field__input" min="0" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantAppendSkill3DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="3" hidden>
+            <label class="switch-row">
+              <span>SKILL 4 開放済み</span>
+              <span class="switch">
+                <input type="checkbox" id="servantAppendSkill4UnlockedToggle">
+                <span class="switch__track"></span>
+              </span>
+            </label>
+            <label class="filebtn" id="servantAppendSkill4IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantAppendSkill4IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantAppendSkill4NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <label class="field">
+              <span class="field__label">スキルレベル</span>
+              <input type="number" id="servantAppendSkill4LevelInput" class="field__input" min="0" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantAppendSkill4DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+
+          <div class="tab-page" data-tab-page="4" hidden>
+            <label class="switch-row">
+              <span>SKILL 5 開放済み</span>
+              <span class="switch">
+                <input type="checkbox" id="servantAppendSkill5UnlockedToggle">
+                <span class="switch__track"></span>
+              </span>
+            </label>
+            <label class="filebtn" id="servantAppendSkill5IconLabel" style="margin-bottom: 8px;">
+              <input type="file" id="servantAppendSkill5IconInput" accept="image/*" hidden>
+              <span>アイコン画像を選択</span>
+            </label>
+            <label class="field">
+              <span class="field__label">スキル名</span>
+              <input type="text" id="servantAppendSkill5NameInput" class="field__input" maxlength="60" placeholder="スキル名">
+            </label>
+            <label class="field">
+              <span class="field__label">スキルレベル</span>
+              <input type="number" id="servantAppendSkill5LevelInput" class="field__input" min="0" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">スキル説明</span>
+              <textarea id="servantAppendSkill5DescInput" class="field__input field__input--area" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+            </label>
+          </div>
+        </details>
+
+        <details class="collapsible-sub">
+          <summary>宝具ウインドウ</summary>
+
+          <label class="field">
+            <span class="field__label">宝具種別（バスター/アーツ/クイック）</span>
+            <select id="servantNpTypeSelect" class="field__input"><!-- JS populates --></select>
+          </label>
+          <label class="field">
+            <span class="field__label">宝具名（ルビ・改行は1回だけ、宝具画像側にのみ反映）</span>
+            <textarea id="servantNpRubyInput" class="field__input" maxlength="60" rows="2" placeholder="ルビ（カナ）"></textarea>
+          </label>
+          <label class="field">
+            <span class="field__label">宝具名（改行は1回だけ、宝具画像側にのみ反映）</span>
+            <textarea id="servantNpNameInput" class="field__input" maxlength="60" rows="2" placeholder="宝具名"></textarea>
+          </label>
+
+          <label class="filebtn" id="servantNpIconLabel" style="margin-top: 16px; margin-bottom: 8px;">
+            <input type="file" id="servantNpIconInput" accept="image/*" hidden>
+            <span>キャラ画像を選択</span>
+          </label>
+
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">ランク</span>
+              <input type="text" id="servantNpRankSelect" class="field__input" list="servantNpRankOptions" maxlength="20" placeholder="例: A++">
+            </label>
+            <label class="field">
+              <span class="field__label">種別</span>
+              <input type="text" id="servantNpCategoryInput" class="field__input" maxlength="40" placeholder="対○宝具">
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">宝具Lv.</span>
+              <input type="number" id="servantNpCardLevelInput" class="field__input" min="1" max="10" step="1">
+            </label>
+            <label class="field">
+              <span class="field__label">最大宝具Lv.</span>
+              <input type="number" id="servantNpCardMaxLevelInput" class="field__input" min="1" max="10" step="1">
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">NPゲージ</span>
+              <select id="servantNpGaugeSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+            <label class="field">
+              <span class="field__label">宝具強化段階</span>
+              <input type="number" id="servantNpLevelInput" class="field__input" min="0" max="4" step="1">
+            </label>
+          </div>
+          <label class="field">
+            <span class="field__label">宝具説明</span>
+            <textarea id="servantNpDescInput" class="field__input field__input--area" rows="3" placeholder="宝具効果の説明" maxlength="400"></textarea>
+          </label>
+
+          <!-- 宝具アイコン上の文字の見た目調整——普段は使わない項目なので
+               折りたたんでおく（既定では位置・サイズ等は今までの見た目の
+               まま）。優先度が低い設定だと視覚的にわかるよう、通常の
+               ウインドウ項目より一段階沈んだ見た目（collapsible-sub--minor）
+               にしている。 -->
+          <details class="collapsible-sub collapsible-sub--minor">
+            <summary>宝具アイコンの文字調整</summary>
+            <!-- 順番は「両方に効く前提（横幅）→漢字→ルビ→両者の間隔→
+                 全体の位置」という依存関係の順にしている。 -->
+            <label class="field">
+              <span class="field__label">文字の左右入力範囲</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconInsetXInput" min="-80" max="80" value="24" style="flex: 1;">
+                <input type="number" id="servantNpIconInsetXNumber" min="-80" max="80" value="24" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">漢字のフォントサイズ</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconNameSizeInput" min="10" max="60" value="34" style="flex: 1;">
+                <input type="number" id="servantNpIconNameSizeNumber" min="10" max="60" value="34" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">漢字の高さ</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconNameLineHInput" min="10" max="60" value="32" style="flex: 1;">
+                <input type="number" id="servantNpIconNameLineHNumber" min="10" max="60" value="32" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">行間（漢字1行目〜2行目）</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconLineGapInput" min="-60" max="60" value="18" style="flex: 1;">
+                <input type="number" id="servantNpIconLineGapNumber" min="-60" max="60" value="18" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">漢字の表記方法</span>
+              <select id="servantNpIconAlignSelect" class="field__input">
+                <option value="auto">自動</option>
+                <option value="left">左揃え</option>
+                <option value="center">中央揃え</option>
+                <option value="alternate">互い違い</option>
+              </select>
+            </label>
+            <label class="field">
+              <span class="field__label">ルビの高さ</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconRubySizeInput" min="8" max="40" value="18" style="flex: 1;">
+                <input type="number" id="servantNpIconRubySizeNumber" min="8" max="40" value="18" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">ルビの横幅調整（%）</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconRubyWidthInput" min="50" max="150" value="100" style="flex: 1;">
+                <input type="number" id="servantNpIconRubyWidthNumber" min="50" max="150" value="100" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <!-- ルビも宝具名の漢字と同じく、コンソール側で改行(\n)を入れると
+                 最大2行まで表示する（長いルビが2行に及ぶ公式の宝具名パターン
+                 を再現するため）。ルビの行間だけ独立して調整できる。 -->
+            <label class="field">
+              <span class="field__label">行間（ルビ1行目〜2行目）</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconRubyLineGapInput" min="4" max="80" value="20" style="flex: 1;">
+                <input type="number" id="servantNpIconRubyLineGapNumber" min="4" max="80" value="20" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">ルビと漢字の間隔</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconRubyGapInput" min="-80" max="80" value="32" style="flex: 1;">
+                <input type="number" id="servantNpIconRubyGapNumber" min="-80" max="80" value="32" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+            <label class="field">
+              <span class="field__label">文字の横方向の移動</span>
+              <div style="display: flex; gap: 8px; align-items: center;">
+                <input type="range" id="servantNpIconTextOffsetXInput" min="-100" max="100" value="0" style="flex: 1;">
+                <input type="number" id="servantNpIconTextOffsetXNumber" min="-100" max="100" value="0" class="field__input field__input--number field__input--number-small">
+              </div>
+            </label>
+          </details>
+        </details>
+
+        <!-- コマンドカード5枚——左からクイック→アーツ→バスターの順に
+             固定で並ぶ。内訳は二点つまみスライダーで指定する——左のつまみが
+             クイックの枚数、右のつまみがクイック+アーツの合計枚数を表し、
+             二つのつまみの間がアーツ、右のつまみから右端まででバスターに
+             なる（合計は常に5枚）。 -->
+        <details class="collapsible-sub">
+          <summary>コマンドカードウインドウ</summary>
+          <span class="field__label">クイック / アーツ / バスターの枚数<span id="servantCommandCardCountLabel">2 / 2 / 1</span></span>
+          <div class="dual-range" id="servantCommandCardSlider">
+            <div class="dual-range__track" id="servantCommandCardSliderTrack"></div>
+            <div class="dual-range__thumb" id="servantCommandCardLeftThumb" tabindex="0" role="slider" aria-label="クイック枚数" aria-valuemin="0" aria-valuemax="5" aria-valuenow="2"></div>
+            <div class="dual-range__thumb" id="servantCommandCardRightThumb" tabindex="0" role="slider" aria-label="バスター枚数" aria-valuemin="0" aria-valuemax="5" aria-valuenow="4"></div>
+          </div>
+          <p class="field__hint">左のつまみでクイック、右のつまみでバスターの枚数が変わり、間がアーツになります。表示順は常にクイック→アーツ→バスターの左から並びです。</p>
+        </details>
+      </details>
+
+      <!-- プロフィール（キャンバス側の「プロフィール」タブに対応）。
+           ステータスタブと同じ、縦に並ぶウインドウ単位の折りたたみ構成。 -->
+      <details class="panel">
+        <summary><h2 class="panel__title">プロフィール</h2></summary>
+
+        <details class="collapsible-sub" open>
+          <summary>イラストレーター・声優ウインドウ</summary>
+          <label class="switch-row">
+            <span>このウインドウを表示する</span>
+            <span class="switch">
+              <input type="checkbox" id="servantShowIllustratorVaToggle" checked>
+              <span class="switch__track"></span>
+            </span>
+          </label>
+          <label class="field">
+            <span class="field__label">イラストレーター名</span>
+            <input type="text" id="servantIllustratorNameInput" class="field__input" maxlength="60" placeholder="イラストレーター名">
+          </label>
+          <label class="field">
+            <span class="field__label">声優名</span>
+            <input type="text" id="servantVoiceActorNameInput" class="field__input" maxlength="60" placeholder="声優名">
+          </label>
+        </details>
+
+        <details class="collapsible-sub" open>
+          <summary>キャラクター詳細ウインドウ</summary>
+          <label class="field">
+            <span class="field__label">キャラクター詳細</span>
+            <textarea id="servantCharacterDetailInput" class="field__input field__input--area" rows="6" placeholder="キャラクターの詳細" maxlength="2000"></textarea>
+          </label>
+        </details>
+
+        <details class="collapsible-sub" open>
+          <summary>パラメーターウインドウ</summary>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">筋力</span>
+              <select id="servantParamStrengthSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+            <label class="field">
+              <span class="field__label">耐久</span>
+              <select id="servantParamEnduranceSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">敏捷</span>
+              <select id="servantParamAgilitySelect" class="field__input"><!-- JS populates --></select>
+            </label>
+            <label class="field">
+              <span class="field__label">魔力</span>
+              <select id="servantParamMagicSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+          </div>
+          <div class="field-grid">
+            <label class="field">
+              <span class="field__label">幸運</span>
+              <select id="servantParamLuckSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+            <label class="field">
+              <span class="field__label">宝具</span>
+              <select id="servantParamNpSelect" class="field__input"><!-- JS populates --></select>
+            </label>
+          </div>
+        </details>
+
+        <!-- ユーザーが自由に追加できる「プロフィールN」ウインドウ——
+             最初は空。追加ボタンで自由記入形式のウインドウが増える
+             （基本情報/スキル説明/宝具説明ボタンで内容欄にテキストを
+             組み立てて追記できる）。各項目は.collapsible-subなので、
+             直前の項目との間隔が詰まって見えないよう、ボタン自体の
+             margin-topを広めに取ってある。 -->
+        <div id="servantProfileExtraList"><!-- JS populates --></div>
+        <button type="button" class="btn btn--sm" id="servantProfileExtraAddBtn" style="width:100%; margin-top:20px;">＋ プロフィールウインドウを追加</button>
+      </details>
+
+      <!-- バトルキャラ（キャンバス側の「バトルキャラ」タブに対応） -->
+      <details class="panel">
+        <summary><h2 class="panel__title">バトルキャラ</h2></summary>
+        <p class="mode-page__placeholder">項目は準備中です。</p>
+      </details>
+
+      <!-- ボイス（キャンバス側の「ボイス」タブに対応） -->
+      <details class="panel">
+        <summary><h2 class="panel__title">ボイス</h2></summary>
+        <p class="mode-page__placeholder">項目は準備中です。</p>
+      </details>
+
+      <!-- 各種設定——キャンバス側の特定のタブとは対応しない、サーヴァント
+           詳細画面全体に関わる設定をまとめる場所。まずは背景（ベース）の
+           画像差し替えと色変えから。 -->
+      <details class="panel">
+        <summary><h2 class="panel__title">各種設定</h2></summary>
+
+        <details class="collapsible-sub" open>
+          <summary>背景（ベース）</summary>
+          <div style="display:flex; gap:6px;">
+            <label class="filebtn" id="servantBgBaseLabel" style="flex:1; margin:0;">
+              <input type="file" id="servantBgBaseInput" accept="image/*" hidden>
+              <span>画像を選択</span>
+            </label>
+            <button type="button" class="btn btn--sm btn--danger" id="servantBgBaseClearBtn" style="flex:1;">画像を解除</button>
+          </div>
+          <label class="field" style="margin-top:10px;">
+            <span class="field__label">色相回転（ベース画像）</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantBgBaseHueInput" min="0" max="360" value="0" style="flex: 1; height: 32px;">
+              <input type="number" id="servantBgBaseHueNumber" min="0" max="360" value="0" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+          <!-- sv_header.png（上端の帯）はベース画像と別レイヤーなので、
+               色相回転も個別に持たせる。 -->
+          <label class="field" style="margin-top:10px;">
+            <span class="field__label">色相回転（ヘッダー帯）</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantBgHeaderHueInput" min="0" max="360" value="0" style="flex: 1; height: 32px;">
+              <input type="number" id="servantBgHeaderHueNumber" min="0" max="360" value="0" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+        </details>
+
+        <!-- 左のサイドボタン（ロック/セレクト/お気に入り/プッシュ！）＋
+             上部のタブボタン（ステータス/プロフィール/バトルキャラ/
+             ボイス）——見た目の役割が近いため配色設定は共通。有効時・
+             無効時それぞれのアイコン色/文字色/縁取り色を変えられる
+             （タブボタンにはアイコンが無いため文字色/縁取り色のみ反映）。
+             背景のボタン画像自体（sv_sidebutton.png/sv_button.png等）は
+             差し替えはできないが、色相回転での色変えはできる——サイド
+             ボタン用/タブボタン用で画像は別々だが色味・デザインは共通
+             なので、色相回転も無効時/有効時それぞれ1つずつを両方の画像に
+             一律で効かせる。 -->
+        <details class="collapsible-sub">
+          <summary>サイドボタン・タブボタン</summary>
+          <span class="field__label" style="display:block; margin-top:4px;">ボタン背景 色相回転（無効時）</span>
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+            <input type="range" id="servantButtonBgHueInput" min="0" max="360" value="0" style="flex: 1; height: 32px;">
+            <input type="number" id="servantButtonBgHueNumber" min="0" max="360" value="0" class="field__input field__input--number field__input--number-small">
+          </div>
+          <span class="field__label" style="display:block; margin-top:10px;">ボタン背景 色相回転（有効時）</span>
+          <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
+            <input type="range" id="servantButtonBgActiveHueInput" min="0" max="360" value="0" style="flex: 1; height: 32px;">
+            <input type="number" id="servantButtonBgActiveHueNumber" min="0" max="360" value="0" class="field__input field__input--number field__input--number-small">
+          </div>
+          <span class="field__label" style="display:block; margin-top:10px;">無効時</span>
+          <div style="display:flex; gap:8px;">
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">アイコン色</span>
+              <input type="color" id="servantSideIconColorInput" class="field__color" value="#ffffff">
+            </label>
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">文字色</span>
+              <input type="color" id="servantSideTextColorInput" class="field__color" value="#ffffff">
+            </label>
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">縁取り色</span>
+              <input type="color" id="servantSideOutlineColorInput" class="field__color" value="#033567">
+            </label>
+          </div>
+          <span class="field__label" style="display:block; margin-top:10px;">有効時</span>
+          <div style="display:flex; gap:8px;">
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">アイコン色</span>
+              <input type="color" id="servantSideIconActiveColorInput" class="field__color" value="#ffffff">
+            </label>
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">文字色</span>
+              <input type="color" id="servantSideTextActiveColorInput" class="field__color" value="#ffffff">
+            </label>
+            <label class="field field--compact" style="flex:1; margin-top:0;">
+              <span class="field__label">縁取り色</span>
+              <input type="color" id="servantSideOutlineActiveColorInput" class="field__color" value="#e8633d">
+            </label>
+          </div>
+        </details>
+
+        <!-- サイドボタンのうちロック以外（セレクト/お気に入り/プッシュ！）
+             は、アイコン画像・文字列・文字サイズを個別に変更できる。
+             ロックは専用の有効時アイコンを持つ特別枠なので対象外。 -->
+        <details class="collapsible-sub">
+          <summary>サイドボタン（アイコン・文字）</summary>
+
+          <span class="field__label" style="display:block; margin-top:4px;">セレクト</span>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <label class="filebtn" id="servantSideButton2IconLabel" style="flex:1; margin:0;">
+              <input type="file" id="servantSideButton2IconInput" accept="image/*" hidden>
+              <span>画像を選択</span>
+            </label>
+            <button type="button" class="btn btn--sm btn--danger" id="servantSideButton2IconClearBtn" style="flex:1;">画像を解除</button>
+          </div>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字列</span>
+            <input type="text" id="servantSideButton2TextInput" class="field__input" maxlength="20">
+          </label>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字サイズ</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantSideButton2SizeInput" min="10" max="40" value="20" style="flex: 1; height: 32px;">
+              <input type="number" id="servantSideButton2SizeNumber" min="10" max="40" value="20" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+
+          <span class="field__label" style="display:block; margin-top:16px;">お気に入り</span>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <label class="filebtn" id="servantSideButton3IconLabel" style="flex:1; margin:0;">
+              <input type="file" id="servantSideButton3IconInput" accept="image/*" hidden>
+              <span>画像を選択</span>
+            </label>
+            <button type="button" class="btn btn--sm btn--danger" id="servantSideButton3IconClearBtn" style="flex:1;">画像を解除</button>
+          </div>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字列</span>
+            <input type="text" id="servantSideButton3TextInput" class="field__input" maxlength="20">
+          </label>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字サイズ</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantSideButton3SizeInput" min="10" max="40" value="17" style="flex: 1; height: 32px;">
+              <input type="number" id="servantSideButton3SizeNumber" min="10" max="40" value="17" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+
+          <span class="field__label" style="display:block; margin-top:16px;">プッシュ！</span>
+          <div style="display:flex; gap:6px; margin-top:6px;">
+            <label class="filebtn" id="servantSideButton4IconLabel" style="flex:1; margin:0;">
+              <input type="file" id="servantSideButton4IconInput" accept="image/*" hidden>
+              <span>画像を選択</span>
+            </label>
+            <button type="button" class="btn btn--sm btn--danger" id="servantSideButton4IconClearBtn" style="flex:1;">画像を解除</button>
+          </div>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字列</span>
+            <input type="text" id="servantSideButton4TextInput" class="field__input" maxlength="20">
+          </label>
+          <label class="field" style="margin-top:8px;">
+            <span class="field__label">文字サイズ</span>
+            <div style="display: flex; gap: 8px; align-items: center;">
+              <input type="range" id="servantSideButton4SizeInput" min="10" max="40" value="17" style="flex: 1; height: 32px;">
+              <input type="number" id="servantSideButton4SizeNumber" min="10" max="40" value="17" class="field__input field__input--number field__input--number-small">
+            </div>
+          </label>
+        </details>
+
+        <!-- ステータス/宝具ウインドウ共通の黄色いラベル文字（強化/宝具/
+             スキル/絆Lv./NEXT/ランク/種別/宝具Lv./NPゲージ等）の色。 -->
+        <details class="collapsible-sub">
+          <summary>黄色いラベル文字（強化等）</summary>
+          <label class="field field--compact" style="margin-top:4px;">
+            <span class="field__label">文字色</span>
+            <input type="color" id="servantYellowLabelColorInput" class="field__color" value="#f8c500">
+          </label>
+        </details>
+      </details>
+    </div>
+    </div>
+
     <details class="console__footer" id="consoleFooterDetails" open>
       <summary class="console__footer-summary">
         <span class="console__footer-title">保存</span>
       </summary>
-      <div class="footer-tabs" id="footerTabs">
-        <button type="button" class="footer-tab is-active" id="footerTabExportBtn" data-tab="export">画像保存</button>
-        <button type="button" class="footer-tab" id="footerTabProjectBtn" data-tab="project">プロジェクト</button>
-        <button type="button" class="footer-tab" id="footerTabVideoBtn" data-tab="video">動画保存</button>
-      </div>
 
-      <div class="footer-tab-panels">
-        <div class="footer-tab-panel" id="footerPanelExport">
-          <label class="field" style="margin-bottom: 10px;">
-            <span class="field__label">ファイル名</span>
-            <input type="text" id="exportNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
-          </label>
-          <button class="btn btn--primary" id="exportBtn">PNG画像として保存</button>
+      <!-- シナリオ用（画像保存 / プロジェクト / 動画保存）。動画保存は
+           シナリオ再生に紐づく機能なのでサーヴァント詳細側には無い。 -->
+      <div class="footer-mode-body" id="scenarioFooterBody">
+        <div class="footer-tabs" id="footerTabs">
+          <button type="button" class="footer-tab is-active" id="footerTabExportBtn" data-tab="export">画像保存</button>
+          <button type="button" class="footer-tab" id="footerTabProjectBtn" data-tab="project">プロジェクト</button>
+          <button type="button" class="footer-tab" id="footerTabVideoBtn" data-tab="video">動画保存</button>
         </div>
 
-        <div class="footer-tab-panel is-hidden" id="footerPanelProject">
-          <label class="field" style="margin-bottom: 10px;">
-            <span class="field__label">プロジェクト名</span>
-            <input type="text" id="projectNameInput" class="field__input" placeholder="project_日時（未入力時）">
-          </label>
-          <div class="btn-row">
-            <button type="button" class="btn btn--sm" id="projectSaveBtn">保存</button>
-            <label class="filebtn" id="projectOpenLabel" style="flex:1; margin:0;">
-              <input type="file" id="projectOpenInput" accept=".json,.fgoscene.json,application/json" hidden>
-              <span>開く</span>
+        <div class="footer-tab-panels">
+          <div class="footer-tab-panel" id="footerPanelExport">
+            <label class="field" style="margin-bottom: 10px;">
+              <span class="field__label">ファイル名</span>
+              <input type="text" id="exportNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
             </label>
+            <button class="btn btn--primary" id="exportBtn">PNG画像として保存</button>
           </div>
-        </div>
 
-        <div class="footer-tab-panel is-hidden" id="footerPanelVideo">
-          <label class="field" style="margin-bottom: 10px;">
-            <span class="field__label">ファイル名</span>
-            <input type="text" id="videoNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
-          </label>
-          <div class="btn-row">
-            <button type="button" class="btn btn--sm" id="scenarioPreviewBtn">プレビュー再生</button>
-            <div class="video-save-menu-wrap">
-              <button type="button" class="btn btn--primary" id="scenarioPlayBtn" style="width:100%;">再生開始 ▾</button>
-              <div class="video-format-menu" id="videoFormatMenu">
-                <button type="button" class="video-format-menu__item" data-format="webm">WebM動画として保存</button>
-                <button type="button" class="video-format-menu__item" data-format="gif">GIF画像として保存</button>
-              </div>
+          <div class="footer-tab-panel is-hidden" id="footerPanelProject">
+            <label class="field" style="margin-bottom: 10px;">
+              <span class="field__label">プロジェクト名</span>
+              <input type="text" id="projectNameInput" class="field__input" placeholder="project_日時（未入力時）">
+            </label>
+            <div class="btn-row">
+              <button type="button" class="btn btn--sm" id="projectSaveBtn">保存</button>
+              <label class="filebtn" id="projectOpenLabel" style="flex:1; margin:0;">
+                <input type="file" id="projectOpenInput" accept=".json,.fgoscene.json,.fgoservant.json,application/json" hidden>
+                <span>開く</span>
+              </label>
             </div>
           </div>
-          <button type="button" class="btn btn--danger btn--sm" id="scenarioCancelBtn" style="width:100%; margin-top:8px;" hidden>録画を中止</button>
-          <p class="field__hint" id="videoFormatHint"></p>
+
+          <div class="footer-tab-panel is-hidden" id="footerPanelVideo">
+            <label class="field" style="margin-bottom: 10px;">
+              <span class="field__label">ファイル名</span>
+              <input type="text" id="videoNameInput" class="field__input" placeholder="scenario_日時（未入力時）">
+            </label>
+            <div class="btn-row">
+              <button type="button" class="btn btn--sm" id="scenarioPreviewBtn">プレビュー再生</button>
+              <div class="video-save-menu-wrap">
+                <button type="button" class="btn btn--primary" id="scenarioPlayBtn" style="width:100%;">再生開始 ▾</button>
+                <div class="video-format-menu" id="videoFormatMenu">
+                  <button type="button" class="video-format-menu__item" data-format="webm">WebM動画として保存</button>
+                  <button type="button" class="video-format-menu__item" data-format="gif">GIF画像として保存</button>
+                </div>
+              </div>
+            </div>
+            <button type="button" class="btn btn--danger btn--sm" id="scenarioCancelBtn" style="width:100%; margin-top:8px;" hidden>録画を中止</button>
+            <p class="field__hint" id="videoFormatHint"></p>
+          </div>
+        </div>
+      </div>
+
+      <!-- サーヴァント詳細用（画像保存 / プロジェクトのみ） -->
+      <div class="footer-mode-body is-hidden" id="servantFooterBody">
+        <div class="footer-tabs" id="servantFooterTabs">
+          <button type="button" class="footer-tab is-active" id="servantFooterTabExportBtn" data-tab="export">画像保存</button>
+          <button type="button" class="footer-tab" id="servantFooterTabProjectBtn" data-tab="project">プロジェクト</button>
+        </div>
+
+        <div class="footer-tab-panels">
+          <div class="footer-tab-panel" id="servantFooterPanelExport">
+            <label class="field" style="margin-bottom: 10px;">
+              <span class="field__label">ファイル名</span>
+              <input type="text" id="servantExportNameInput" class="field__input" placeholder="servant_日時（未入力時）">
+            </label>
+            <button class="btn btn--primary" id="servantExportBtn">PNG画像として保存</button>
+          </div>
+
+          <div class="footer-tab-panel is-hidden" id="servantFooterPanelProject">
+            <label class="field" style="margin-bottom: 10px;">
+              <span class="field__label">プロジェクト名</span>
+              <input type="text" id="servantProjectNameInput" class="field__input" placeholder="servant_日時（未入力時）">
+            </label>
+            <div class="btn-row">
+              <button type="button" class="btn btn--sm" id="servantProjectSaveBtn">保存</button>
+              <label class="filebtn" id="servantProjectOpenLabel" style="flex:1; margin:0;">
+                <input type="file" id="servantProjectOpenInput" accept=".json,.fgoservant.json,.fgoscene.json,application/json" hidden>
+                <span>開く</span>
+              </label>
+            </div>
+          </div>
         </div>
       </div>
     </details>
   </aside>
+
 </div>
+
+<!-- スキル/宝具のランクは自由記入（テキスト入力）だが、よく使う段階を
+     候補として出せるよう、input[list]で参照する共通datalist。JS側で
+     SERVANT_SKILL_RANK_OPTIONS/SERVANT_NP_RANK_OPTIONSから中身を作る。 -->
+<datalist id="servantSkillRankOptions"></datalist>
+<datalist id="servantNpRankOptions"></datalist>
+
+<!-- 追加プロフィールウインドウ1件ぶんの入力欄テンプレート
+     （renderServantProfileExtraListが複製） -->
+<template id="servantProfileExtraItemTemplate">
+  <details class="collapsible-sub" open>
+    <summary>
+      <span class="profile-extra-item__title" style="flex: 1;"></span>
+      <button type="button" class="panel__inline-btn profile-extra-item__del">削除</button>
+    </summary>
+    <label class="switch-row">
+      <span>プロフィールをロック</span>
+      <span class="switch">
+        <input type="checkbox" class="profile-extra-item__locktoggle">
+        <span class="switch__track"></span>
+      </span>
+    </label>
+    <div class="profile-extra-item__unlocked-fields">
+      <div style="display:flex; gap:6px;">
+        <button type="button" class="btn btn--sm profile-extra-item__insertbtn" data-insert-kind="basic" style="flex:1;">基本情報</button>
+        <button type="button" class="btn btn--sm profile-extra-item__insertbtn" data-insert-kind="skill" style="flex:1;">スキル説明</button>
+        <button type="button" class="btn btn--sm profile-extra-item__insertbtn" data-insert-kind="np" style="flex:1;">宝具説明</button>
+      </div>
+      <div class="profile-extra-item__insert-form" hidden></div>
+      <label class="field">
+        <span class="field__label">内容</span>
+        <textarea class="field__input field__input--area profile-extra-item__textinput" rows="4" placeholder="自由に記入してください" maxlength="2000"></textarea>
+      </label>
+    </div>
+    <div class="profile-extra-item__locked-fields" hidden>
+      <label class="field">
+        <span class="field__label">解放条件</span>
+        <textarea class="field__input field__input--area profile-extra-item__conditioninput" rows="4" placeholder="例: 絆Lv.5で解放" maxlength="500"></textarea>
+      </label>
+    </div>
+  </details>
+</template>
+
+<!-- クラススキル1件ぶんの入力欄テンプレート（renderServantClassSkillListが複製） -->
+<template id="servantClassSkillItemTemplate">
+  <div class="class-skill-item">
+    <div style="display:flex; align-items:center; justify-content:space-between;">
+      <span class="field__label class-skill-item__title"></span>
+      <button type="button" class="btn btn--danger btn--sm class-skill-item__del">削除</button>
+    </div>
+    <label class="filebtn class-skill-item__iconlabel" style="margin-bottom: 8px;">
+      <input type="file" class="class-skill-item__iconinput" accept="image/*" hidden>
+      <span>アイコン画像を選択</span>
+    </label>
+    <label class="field">
+      <span class="field__label">スキル名</span>
+      <input type="text" class="field__input class-skill-item__nameinput" maxlength="60" placeholder="スキル名">
+    </label>
+    <label class="field">
+      <span class="field__label">ランク</span>
+      <input type="text" class="field__input class-skill-item__rankselect" list="servantSkillRankOptions" maxlength="20" placeholder="例: B+">
+    </label>
+    <label class="field">
+      <span class="field__label">スキル説明</span>
+      <textarea class="field__input field__input--area class-skill-item__descinput" rows="3" placeholder="スキル効果の説明" maxlength="300"></textarea>
+    </label>
+    <div class="panel__divider"></div>
+  </div>
+</template>
 
 <!-- char list item template -->
 <template id="charItemTemplate">
@@ -426,6 +1525,16 @@
     <span class="charlist__name"></span>
     <span class="charlist__active-dot" title="表示中の背景"></span>
     <button type="button" class="charlist__del" title="この背景を削除">×</button>
+  </li>
+</template>
+
+<!-- servant saint graph image list item template -->
+<template id="servantGraphItemTemplate">
+  <li class="charlist__item" data-id="">
+    <span class="charlist__drag-handle" title="ドラッグで重なり順を変更">⠿</span>
+    <span class="charlist__thumb"><img alt=""></span>
+    <span class="charlist__name"></span>
+    <button type="button" class="charlist__del" title="この画像を削除">×</button>
   </li>
 </template>
 

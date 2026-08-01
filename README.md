@@ -61,6 +61,22 @@ fgo-scene-maker/
 │   ├─ skip_button.png      … SKIPボタン
 │   ├─ log_button.png / auto_button.png / next.png … 右下のミニアイコン
 │   ├─ scroll.png           … LOGログのスクロールバーのつまみ
+│   ├─ sv_background.png    … サーヴァント詳細画面の背景
+│   ├─ sv_sidebutton.png    … サーヴァント詳細画面、左の4アイコンボタンの背景（sv_sidebutton_active.pngは有効時）
+│   ├─ sv_close.png         … サーヴァント詳細画面、左上の「閉じる」ボタン
+│   ├─ sv_side_icon1〜4.png … サーヴァント詳細画面、左の4アイコンボタンの絵柄（ロック/セレクト/お気に入り/プッシュ！、sv_side_icon1_active.pngはロック有効時）
+│   ├─ sv_button.png        … サーヴァント詳細画面、ステータス/プロフィール等の切り替えタブの背景（sv_button_active.pngは選択中）
+│   ├─ sv_header.png        … サーヴァント詳細画面、画面上部の帯
+│   ├─ sv_saint_graph_gold.png … サーヴァント詳細画面、セイントグラフ欄のフレーム
+│   ├─ sv_atk_hp.png        … サーヴァント詳細画面、セイントグラフ下部のATK/HPラベル（フレームに重ねる）
+│   ├─ sv_window.png        … サーヴァント詳細画面、ステータス等のコンテンツウインドウ（縦方向に伸縮）
+│   ├─ sv_window_name.png   … サーヴァント詳細画面、ウインドウの見出しタブ（横方向に伸縮）
+│   ├─ sv_ascension.png / sv_ascension_blank.png      … サーヴァント詳細画面、再臨段階のひし形（達成/未達成）
+│   ├─ sv_bond_blank.png    … サーヴァント詳細画面、絆レベルのひし形（未達成分、暫定素材）
+│   ├─ sv_bond_ten.png      … サーヴァント詳細画面、最大絆レベル11〜15の時に絆レベル10分をまとめて表す特殊アイコン
+│   ├─ sv_noble_icon.png / sv_noble_icon_active.png   … サーヴァント詳細画面、宝具強化段階アイコン（未達成/達成）
+│   ├─ sv_skill_icon.png / sv_skill_icon_active.png   … サーヴァント詳細画面、スキル強化段階アイコン（未達成/達成）
+│   ├─ sv_skill_frame.png   … サーヴァント詳細画面、保有スキルアイコンに重ねる枠
 │   └─ favicon.png          … ブラウザタブ用アイコン
 └─ fonts/
     └─ GenEiLateMinN_v2.woff2   … セリフ用フォント
@@ -74,7 +90,7 @@ fgo-scene-maker/
 
 ```
 cd fgo-scene-maker
-python3 build_assets.py
+python build_assets.py
 ```
 
 これで `assets-data.js` / `font-data.js` が新しい内容で上書きされます。

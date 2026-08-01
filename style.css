@@ -83,6 +83,126 @@ body::before {
   width: 100vw;
 }
 
+/* ================= サーヴァント詳細専用の定型表記フローティングツール =================
+   画面左下に固定——キャンバスやコンソールの通常のレイアウトとは独立に
+   常時表示する（サーヴァント詳細タブの間だけ）。 */
+.template-toolbar {
+  position: fixed;
+  left: 16px;
+  bottom: 16px;
+  z-index: 50;
+  width: 220px;
+  background: rgba(10, 14, 26, 0.92);
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-m);
+  padding: 10px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.template-toolbar.is-hidden { display: none; }
+.template-toolbar__title {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  margin: -10px -10px 8px;
+  padding: 8px 10px;
+  cursor: move;
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+  border-bottom: 1px solid var(--line-cyan-dim);
+}
+.template-toolbar__row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.template-toolbar__row--grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+}
+.template-toolbar__btn {
+  flex: 1;
+  min-width: 0;
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  background: var(--bg-panel-raised);
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 6px 8px;
+  cursor: pointer;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  transition: border-color .15s ease, background .15s ease;
+}
+.template-toolbar__btn:hover {
+  border-color: var(--line-cyan);
+  background: var(--line-cyan-dimmer);
+}
+.template-toolbar__btn--wide {
+  font-size: 11px;
+}
+.template-toolbar .field__input--number-small {
+  flex: 0 0 auto;
+}
+
+/* ================= 画面切り替えタブ（シナリオ / サーヴァント詳細） =================
+   CHALDEA CONSOLE内、背景パネルより上に置く——タブ自体は常に表示され続ける
+   必要がある（隠れると切り替えられなくなるため）ので、切り替えの対象
+   （プレビュー側のキャンバス描画内容・コンソール側の.console__scroll）
+   とは別に、常設のヘッダー直下に置いている。 */
+.mode-tabs {
+  display: flex;
+  flex-shrink: 0;
+  gap: 6px;
+  padding: 14px 22px;
+  border-bottom: 1px solid var(--line-cyan-dim);
+}
+.mode-tab {
+  flex: 1;
+  appearance: none;
+  border: 1px solid var(--line-cyan-dim);
+  background: var(--bg-input);
+  color: var(--text-muted);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+  font-size: 12.5px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.mode-tab:hover { border-color: var(--line-cyan); color: var(--text-primary); }
+.mode-tab.is-active {
+  background: var(--line-cyan-dimmer);
+  border-color: var(--line-cyan);
+  color: var(--line-cyan);
+  font-weight: 600;
+}
+
+/* サーヴァント詳細タブの間、コンソール（.console__scroll）の中身を隠し、
+   代わりにプレースホルダーを表示する。プレビュー側はキャンバス自体は
+   常に表示したまま、描く内容をJS側で切り替える（.stage__hintだけは
+   シナリオ専用の操作説明なのでここで隠す）。
+   ※!importantが必要——「body.console-wide .console__scroll」（コンソール
+   幅を広げた時の2列化ルール、下記参照）はbody要素ぶん詳細度が高く、
+   後から書いても素の.is-hiddenでは負けてしまう。負けると、コンソールを
+   広げてconsole-wideになった瞬間、隠しているはずのシナリオ側の
+   コンソール（背景/キャラクター/動画パネル）がdisplay:flexで復活し、
+   サーヴァント詳細のコンソールと重なって干渉して見える不具合になる。 */
+.console__scroll.is-hidden,
+.stage__hint.is-hidden {
+  display: none !important;
+}
+.mode-page__placeholder {
+  color: var(--text-faint);
+  font-size: 14px;
+  letter-spacing: 0.05em;
+}
+
 /* ================= STAGE (canvas area) ================= */
 .stage {
   flex: 1;
@@ -600,11 +720,38 @@ body.is-scenario-playing .console__body {
   flex: 1;
 }
 
+/* summary内に置く小さいON/OFFボタン共通——.panel__titleがflex:1で
+   場所を取るため、後ろに置くだけで自然と右端に寄る。summaryの中に
+   置くと素のクリックで折りたたみが開閉してしまうため、押した時は
+   JS側でpreventDefault/stopPropagationしている。 */
+.panel__inline-btn {
+  flex: 0 0 auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--text-muted);
+  background: var(--bg-panel-raised);
+  border: 1px solid var(--line-cyan-dim);
+  border-radius: var(--radius-s);
+  padding: 5px 10px;
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease, color .15s ease;
+}
+.panel__inline-btn:hover {
+  border-color: var(--line-cyan);
+  color: var(--text-primary);
+}
+.panel__inline-btn.is-active {
+  color: var(--line-cyan);
+  border-color: var(--line-cyan);
+  background: var(--line-cyan-dimmer);
+}
+
 /* .panelの折りたたみシェブロンと同じ見た目の、より小さい入れ子用
    折りたたみ（例: 表情差分シートの詳細設定）。コンソールの大枠パネルと
    同じ操作感にしつつ、ラベル用のサイズ感（11px/大文字/字間広め）に揃える */
 details.collapsible-sub {
-  margin-top: 10px;
+  margin-top: 22px;
 }
 details.collapsible-sub > summary {
   cursor: pointer;
@@ -641,6 +788,24 @@ details.collapsible-sub > summary::before {
 }
 details.collapsible-sub[open] > summary::before {
   transform: rotate(90deg);
+}
+
+/* 優先度の低い設定（宝具アイコンの文字調整など）を、通常のウインドウ
+   項目と見分けがつくよう一段階沈んだ見た目にする——背景を敷いて枠で
+   囲い、見出しも一回り小さく暗めにする。 */
+details.collapsible-sub--minor {
+  background: rgba(0, 0, 0, 0.18);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-radius: var(--radius-s);
+  padding: 8px 10px;
+}
+details.collapsible-sub--minor > summary {
+  font-size: 10px;
+  color: var(--text-faint);
+  margin: 0;
+}
+details.collapsible-sub--minor[open] > summary {
+  margin-bottom: 6px;
 }
 
 .panel__title {
@@ -846,6 +1011,65 @@ details.collapsible-sub[open] > summary::before {
 
 .charlist__item.is-hidden {
   opacity: 0.45;
+}
+
+/* セイントグラフフレームなど、実物の見た目を見ながら選びたい選択肢を
+   横スクロールのサムネイル一覧で見せる時に使う（.charlist__thumbとは
+   別に、もっと大きいプレビューを横に並べる想定）。 */
+.frame-select {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+  padding-bottom: 4px;
+  overflow-x: auto;
+}
+
+.frame-select__item {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  width: 72px;
+  padding: 6px;
+  border-radius: var(--radius-s);
+  border: 1px solid transparent;
+  background: var(--bg-panel-raised);
+  cursor: pointer;
+  transition: border-color .15s ease, background .15s ease;
+}
+.frame-select__item:hover { border-color: var(--line-cyan-dim); }
+.frame-select__item.is-selected { border-color: var(--line-cyan); background: var(--line-cyan-dimmer); }
+
+.frame-select__thumb {
+  width: 60px;
+  height: 102px;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.frame-select__thumb img { width: 100%; height: 100%; object-fit: contain; }
+
+/* スキルアイコン候補一覧など、正方形に近い画像を並べる時はこちらを使う
+   （セイントグラフフレームのような縦長カードと違い、縦に間延びさせない）。 */
+.frame-select__thumb--square { width: 60px; height: 60px; }
+
+/* 画像を消すための「なし」選択肢——実画像のサムネイルと見分けがつくよう
+   点線枠+テキストのみにする。 */
+.frame-select__thumb--none {
+  background: transparent;
+  border: 1px dashed var(--text-muted);
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.frame-select__label {
+  font-size: 12px;
+  color: var(--text-primary);
+  white-space: nowrap;
 }
 
 .charlist__del {
@@ -1280,6 +1504,18 @@ details.collapsible-sub[open] > summary::before {
   margin-top: 14px;
 }
 .field:first-child { margin-top: 0; }
+/* .fieldも.filebtnも自前でdisplayを指定しているため、hidden属性（UA既定
+   スタイルの[hidden]{display:none}）だけでは同じ詳細度で後勝ちして隠れ
+   ない——.video-format-menuと同じ理由でclass切り替え方式にしている。 */
+.field.is-hidden,
+.filebtn.is-hidden {
+  display: none;
+}
+
+/* 保存欄（フッター）のシナリオ用/サーヴァント詳細用の切り替え */
+.footer-mode-body.is-hidden {
+  display: none;
+}
 
 .field__label {
   display: block;
@@ -1373,6 +1609,48 @@ input[type="range"] {
   width: 100%;
   accent-color: var(--line-cyan);
   height: 20px;
+}
+
+/* ---- dual-range (二点つまみスライダー、グラデーション編集のような見た目) ---- */
+.dual-range {
+  position: relative;
+  height: 28px;
+  margin: 8px 0 4px;
+}
+.dual-range__track {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  height: 10px;
+  border-radius: 999px;
+  box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.35);
+}
+/* つまみはinput[type=range]を2つ重ねる方式ではなく、divを2つ自前で
+   ドラッグ制御する——ネイティブレンジ2つ重ね方式だと、二つの値が同じ位置
+   に重なった時にどちらの要素がクリックを受け取るかがブラウザの
+   ヒットテスト（JS実行前に確定済み）任せになり、z-indexをJS側でいくら
+   調整しても「押した瞬間には手遅れ」で片方のつまみが操作不能になる
+   問題が解消できなかったため。divなら pointerdown 時に自前で最寄りの
+   つまみを判定してsetPointerCaptureで掴み続けられる。 */
+.dual-range__thumb {
+  position: absolute;
+  top: 50%;
+  width: 18px;
+  height: 18px;
+  margin-left: -9px;
+  border-radius: 50%;
+  background: #f2f2f2;
+  border: 2px solid #1b1f27;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.5);
+  cursor: pointer;
+  transform: translateY(-50%);
+  touch-action: none;
+}
+.dual-range__thumb:focus-visible {
+  outline: 2px solid var(--line-cyan);
+  outline-offset: 2px;
 }
 
 /* ---- switch ---- */
