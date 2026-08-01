@@ -16,7 +16,10 @@
        カーソル位置へワンボタンで挿し込む。position:fixedなので.appの
        フレックスレイアウトには影響しない。 -->
   <div class="template-toolbar is-hidden" id="servantTemplateToolbar">
-    <div class="template-toolbar__title">定型表記を挿入</div>
+    <div class="template-toolbar__title">
+      <span>定型表記を挿入</span>
+      <button type="button" class="template-toolbar__collapse-btn" id="servantTemplateToolbarCollapseBtn" title="折りたたむ">▾</button>
+    </div>
 
     <div class="template-toolbar__row">
       <button type="button" class="template-toolbar__btn" id="templateBtnTurn">(nターン)</button>
@@ -496,6 +499,17 @@
         <p class="field__hint" style="margin: 2px 0 8px;">タブ、またはキャンバス上のセイントグラフ左右の矢印で、画像を編集する再臨段階を切り替えられます。</p>
         <div class="mode-tabs" id="servantGraphAscensionTabs" style="padding: 0; border-bottom: none; margin: 0 0 10px;"><!-- JS populates --></div>
         <span class="field__label" id="servantGraphAscensionLabel">編集中: 第一再臨</span>
+        <!-- ONの間、第一再臨の画像状態（画像一覧・位置・拡大率）を第二・
+             第三再臨と共有し、どれか1つを編集すると他も連動する（最終再臨は
+             対象外）。OFFにすると、その時点の状態を維持したまま3つが
+             独立に戻る。 -->
+        <label class="switch-row" style="margin: 14px 0 0 0; padding: 6px 0;">
+          <span>画像のリンク（第一〜第三再臨）</span>
+          <span class="switch">
+            <input type="checkbox" id="servantGraphAscensionLinkToggle">
+            <span class="switch__track"></span>
+          </span>
+        </label>
         <label class="filebtn" id="servantGraphImageAddLabel" style="margin-top:8px;">
           <input type="file" id="servantGraphImageInput" accept="image/*" multiple hidden>
           <span>画像を追加</span>
@@ -586,7 +600,7 @@
               <input type="number" id="servantNextLevelExpInput" class="field__input" min="0" max="99999999" step="1">
             </label>
           </div>
-          <label class="switch-row">
+          <label class="switch-row" style="margin: 14px 0 0 0; padding: 6px 0;">
             <span>NEXTを表示</span>
             <span class="switch">
               <input type="checkbox" id="servantNextLevelExpToggle" checked>
@@ -658,6 +672,15 @@
           <label class="field">
             <span class="field__label">絆レベルアップまでの経験値）</span>
             <input type="number" id="servantNextExpInput" class="field__input" min="0" max="99999999" step="1">
+          </label>
+          <!-- Lv.側のNEXT表示トグルとは違い、こちらはOFFでも「NEXT」の
+               文字自体は残したまま、数値部分だけを隠す。 -->
+          <label class="switch-row" style="margin: 14px 0 0 0; padding: 6px 0;">
+            <span>NEXTの数値を表示</span>
+            <span class="switch">
+              <input type="checkbox" id="servantBondNextExpToggle" checked>
+              <span class="switch__track"></span>
+            </span>
           </label>
         </details>
 
@@ -944,7 +967,16 @@
             <textarea id="servantNpNameInput" class="field__input" maxlength="60" rows="2" placeholder="宝具名"></textarea>
           </label>
 
-          <label class="filebtn" id="servantNpIconLabel" style="margin-top: 16px; margin-bottom: 8px;">
+          <!-- キャラ画像（宝具アイコンに重ねる画像）は再臨段階（第１〜第３
+               段階）ごとに個別に指定できる。プレビュー側の第１〜第３段階
+               ボタンとタブは同じ状態(servantCommandCardAscension)を共有
+               するため、どちらを操作しても連動する。 -->
+          <div class="mode-tabs" id="servantNpIconStageTabs" style="padding: 0; border-bottom: none; margin: 16px 0 8px;">
+            <button type="button" class="mode-tab is-active" data-stage="1">第１段階</button>
+            <button type="button" class="mode-tab" data-stage="2">第２段階</button>
+            <button type="button" class="mode-tab" data-stage="3">第３段階</button>
+          </div>
+          <label class="filebtn" id="servantNpIconLabel" style="margin-bottom: 8px;">
             <input type="file" id="servantNpIconInput" accept="image/*" hidden>
             <span>キャラ画像を選択</span>
           </label>
@@ -1078,6 +1110,7 @@
              なる（合計は常に5枚）。 -->
         <details class="collapsible-sub">
           <summary>コマンドカードウインドウ</summary>
+          <p class="field__hint">カードに重ねる画像（再臨の第１〜第３段階ごと）は、ここではなく「宝具ウインドウ」のキャラ画像選択欄から指定します。</p>
           <span class="field__label">クイック / アーツ / バスターの枚数<span id="servantCommandCardCountLabel">2 / 2 / 1</span></span>
           <div class="dual-range" id="servantCommandCardSlider">
             <div class="dual-range__track" id="servantCommandCardSliderTrack"></div>
@@ -1211,16 +1244,19 @@
 
         <!-- 左のサイドボタン（ロック/セレクト/お気に入り/プッシュ！）＋
              上部のタブボタン（ステータス/プロフィール/バトルキャラ/
-             ボイス）——見た目の役割が近いため配色設定は共通。有効時・
+             ボイス）＋コマンドカード下の再臨段階選択ボタン（第１〜第３
+             段階）——見た目の役割が近いため配色設定は共通。有効時・
              無効時それぞれのアイコン色/文字色/縁取り色を変えられる
-             （タブボタンにはアイコンが無いため文字色/縁取り色のみ反映）。
-             背景のボタン画像自体（sv_sidebutton.png/sv_button.png等）は
-             差し替えはできないが、色相回転での色変えはできる——サイド
-             ボタン用/タブボタン用で画像は別々だが色味・デザインは共通
-             なので、色相回転も無効時/有効時それぞれ1つずつを両方の画像に
-             一律で効かせる。 -->
+             （アイコンが無いタブボタン・段階ボタンには文字色/縁取り色
+             のみ反映）。背景のボタン画像自体（sv_sidebutton.png/
+             sv_button.png/sv_button_hex.png等）は差し替えはできないが、
+             色相回転での色変えはできる——ボタンの種類ごとに画像は別々
+             だが色味・デザインは共通なので、色相回転も無効時/有効時
+             それぞれ1つずつを全ての画像に一律で効かせる。段階ボタンの
+             アクティブ時縁取り色は元々別の色を使っていたが、他と統一
+             した。 -->
         <details class="collapsible-sub">
-          <summary>サイドボタン・タブボタン</summary>
+          <summary>ボタン</summary>
           <span class="field__label" style="display:block; margin-top:4px;">ボタン背景 色相回転（無効時）</span>
           <div style="display: flex; gap: 8px; align-items: center; margin-top: 6px;">
             <input type="range" id="servantButtonBgHueInput" min="0" max="360" value="0" style="flex: 1; height: 32px;">
@@ -1258,7 +1294,7 @@
             </label>
             <label class="field field--compact" style="flex:1; margin-top:0;">
               <span class="field__label">縁取り色</span>
-              <input type="color" id="servantSideOutlineActiveColorInput" class="field__color" value="#e8633d">
+              <input type="color" id="servantSideOutlineActiveColorInput" class="field__color" value="#e66340">
             </label>
           </div>
         </details>

@@ -54,6 +54,8 @@ IMAGE_FILES = {
     "svWindowName": "sv_window_name.png",
     "svButton": "sv_button.png",
     "svButtonActive": "sv_button_active.png",
+    "svButtonHex": "sv_button_hex.png",
+    "svButtonHexActive": "sv_button_hex_active.png",
     "svHeader": "sv_header.png",
     "svAscension": "sv_ascension.png",
     "svAscensionBlank": "sv_ascension_blank.png",

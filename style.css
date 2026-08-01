@@ -102,7 +102,11 @@ body::before {
   gap: 6px;
 }
 .template-toolbar.is-hidden { display: none; }
+.template-toolbar.is-collapsed .template-toolbar__row { display: none; }
 .template-toolbar__title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
   font-size: 11px;
   font-weight: 600;
   color: var(--text-muted);
@@ -116,6 +120,17 @@ body::before {
   -webkit-user-select: none;
   border-bottom: 1px solid var(--line-cyan-dim);
 }
+.template-toolbar__collapse-btn {
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font-size: 10px;
+  line-height: 1;
+  padding: 2px 4px;
+  cursor: pointer;
+  touch-action: auto;
+}
+.template-toolbar__collapse-btn:hover { color: var(--text-primary); }
 .template-toolbar__row {
   display: flex;
   align-items: center;

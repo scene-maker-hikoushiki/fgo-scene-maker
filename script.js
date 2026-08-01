@@ -491,6 +491,8 @@
   const servantCurrentExpInput = document.getElementById("servantCurrentExpInput");
   const servantNextLevelExpInput = document.getElementById("servantNextLevelExpInput");
   const servantNextLevelExpToggle = document.getElementById("servantNextLevelExpToggle");
+  const servantBondNextExpToggle = document.getElementById("servantBondNextExpToggle");
+  const servantGraphAscensionLinkToggle = document.getElementById("servantGraphAscensionLinkToggle");
 
   // 保有スキル1〜3ぶんのDOM参照——3つとも同じ構造なので、IDの規則性を
   // 利用してインデックスでまとめて引けるようにしておく。
@@ -525,6 +527,7 @@
   // (宝具強化段階、0〜4)とは別物なので、混同しないようNpCard接頭辞にする。
   const servantNpTypeSelect = document.getElementById("servantNpTypeSelect");
   const servantNpIconInput = document.getElementById("servantNpIconInput");
+  const servantNpIconStageTabs = document.getElementById("servantNpIconStageTabs");
   const servantNpRubyInput = document.getElementById("servantNpRubyInput");
   const servantNpNameInput = document.getElementById("servantNpNameInput");
   const servantNpRankSelect = document.getElementById("servantNpRankSelect");
@@ -673,6 +676,7 @@
     currentExp: 0, // 現在の経験値——Lv.横のバーは現在レベル/最大レベルではなく、この値とnextLevelExpの比率で表示する
     nextLevelExp: 0, // 絆Lv.のNEXTとは別——次のキャラクターレベルまでの必要経験値
     showNextLevelExp: true, // 上のNEXT表示自体の表示/非表示
+    showBondNextExp: true, // 絆Lv.のNEXT——こちらはOFFでも「NEXT」の文字は残し、数値だけ隠す
   };
 
   // 保有スキル（戦闘中任意発動の3スキル）。ランクは無効の"-"、E〜Aの
@@ -970,14 +974,16 @@
   // 入力欄には影響しない）。
   const SERVANT_NP_PREVIEW_NAME = "約束された\n勝利の剣";
   const SERVANT_NP_PREVIEW_RUBY = "エクスカリバー";
+  // キャラ画像（宝具アイコンに重ねる画像）は再臨の第１〜第３段階ごとに
+  // 個別の画像・位置・拡大率を持てる——添字0〜2がそのまま段階1〜3に対応
+  // する。今どの段階を編集/表示しているかはservantCommandCardAscension
+  // （プレビューの第１〜第３段階ボタン、コンソールのタブと共有）で決まる。
+  function createServantNpIconStageEntry() {
+    return { icon: null, iconNaturalW: 0, iconNaturalH: 0, iconOffsetX: 0, iconOffsetY: 0, iconScale: 1 };
+  }
   const servantNp = {
     type: SERVANT_NP_TYPE_OPTIONS[0].id,
-    icon: null,
-    iconNaturalW: 0,
-    iconNaturalH: 0,
-    iconOffsetX: 0,
-    iconOffsetY: 0,
-    iconScale: 1,
+    iconsByStage: [createServantNpIconStageEntry(), createServantNpIconStageEntry(), createServantNpIconStageEntry()],
     rubyName: "",
     name: "",
     rank: "",
@@ -987,6 +993,12 @@
     npGauge: SERVANT_NP_GAUGE_OPTIONS[0],
     description: "",
   };
+  // 現在選択中の段階（servantCommandCardAscension、1〜3）に対応する
+  // キャラ画像データを返す——iconのアップロード/描画/ドラッグ操作は
+  // すべてこれ経由にする。
+  function currentNpIconData() {
+    return servantNp.iconsByStage[servantCommandCardAscension - 1];
+  }
 
   // コマンドカード5枚——本家同様、左からクイック→アーツ→バスターの順に
   // まとめて並べる。5枚の内訳（どの種別が何枚か）は自由——3種別のうち
@@ -1224,6 +1236,8 @@
       "svWindowName",
       "svButton",
       "svButtonActive",
+      "svButtonHex",
+      "svButtonHexActive",
       "svHeader",
       "svAscension",
       "svAscensionBlank",
@@ -4287,8 +4301,9 @@
       const box = getServantNpIconBoxRect();
       const newCenterX = pos.x - servantNpIconDragOffsetX;
       const newCenterY = pos.y - servantNpIconDragOffsetY;
-      servantNp.iconOffsetX = newCenterX - (box.x + box.w / 2);
-      servantNp.iconOffsetY = newCenterY - (box.y + box.h / 2);
+      const npIconData = currentNpIconData();
+      npIconData.iconOffsetX = newCenterX - (box.x + box.w / 2);
+      npIconData.iconOffsetY = newCenterY - (box.y + box.h / 2);
       renderAll();
       return;
     }
@@ -4298,14 +4313,15 @@
       const dist = Math.hypot(pos.x - servantNpIconDragAnchorX, pos.y - servantNpIconDragAnchorY);
       const ratio = servantNpIconDragStartDist > 1 ? dist / servantNpIconDragStartDist : 1;
       const newScale = Math.min(10, Math.max(0.02, servantNpIconDragStartScale * ratio));
-      const finalW = servantNp.iconNaturalW * newScale;
-      const finalH = servantNp.iconNaturalH * newScale;
+      const npIconData = currentNpIconData();
+      const finalW = npIconData.iconNaturalW * newScale;
+      const finalH = npIconData.iconNaturalH * newScale;
       const newCenterX = servantNpIconDragAnchorX + (servantNpIconDragGX * finalW) / 2;
       const newCenterY = servantNpIconDragAnchorY + (servantNpIconDragGY * finalH) / 2;
       const box = getServantNpIconBoxRect();
-      servantNp.iconScale = newScale;
-      servantNp.iconOffsetX = newCenterX - (box.x + box.w / 2);
-      servantNp.iconOffsetY = newCenterY - (box.y + box.h / 2);
+      npIconData.iconScale = newScale;
+      npIconData.iconOffsetX = newCenterX - (box.x + box.w / 2);
+      npIconData.iconOffsetY = newCenterY - (box.y + box.h / 2);
       renderAll();
       return;
     }
@@ -6155,6 +6171,7 @@
       /* 何もしない */
     }
     handle.addEventListener("pointerdown", (e) => {
+      if (e.target.closest(".template-toolbar__collapse-btn")) return; // 折りたたみボタン自体はドラッグ扱いにしない
       dragging = true;
       const rect = toolbar.getBoundingClientRect();
       grabOffsetX = e.clientX - rect.left;
@@ -6174,6 +6191,28 @@
         const rect = toolbar.getBoundingClientRect();
         localStorage.setItem("fgoTemplateToolbarPos", JSON.stringify({ left: rect.left, top: rect.top }));
       } catch (e2) {
+        /* 何もしない */
+      }
+    });
+  })();
+
+  // フローティングツールのヘッダー右端の折りたたみボタン——ヘッダー部分
+  // だけを残してボタン一覧（行）を隠す。状態はlocalStorageに覚えさせる。
+  (function enableServantTemplateToolbarCollapse() {
+    const toolbar = servantTemplateToolbar;
+    const btn = document.getElementById("servantTemplateToolbarCollapseBtn");
+    const applyCollapsed = (collapsed) => {
+      toolbar.classList.toggle("is-collapsed", collapsed);
+      btn.textContent = collapsed ? "▸" : "▾";
+      btn.title = collapsed ? "展開する" : "折りたたむ";
+    };
+    applyCollapsed(localStorage.getItem("fgoTemplateToolbarCollapsed") === "on");
+    btn.addEventListener("click", () => {
+      const collapsed = !toolbar.classList.contains("is-collapsed");
+      applyCollapsed(collapsed);
+      try {
+        localStorage.setItem("fgoTemplateToolbarCollapsed", collapsed ? "on" : "off");
+      } catch (e) {
         /* 何もしない */
       }
     });
@@ -6481,6 +6520,13 @@
     e.target.value = "";
   });
 
+  // servantGraphAscensionLinkedの既定値(false)はHTML側のcheckbox初期状態
+  // （unchecked）と一致しているため、ここでの初期同期は不要——
+  // servantGraphAscensionLinkedの宣言（TDZ）より前で参照できないため。
+  servantGraphAscensionLinkToggle.addEventListener("change", (e) => {
+    setServantGraphAscensionLinked(e.target.checked);
+  });
+
   servantFaceImageInput.addEventListener("change", (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -6734,19 +6780,30 @@
       const url = URL.createObjectURL(file);
       const img = new Image();
       img.onload = () => {
-        // 初期表示はアイコン枠に収まる程度のサイズ、中央寄せ
+        // 初期表示はアイコン枠に収まる程度のサイズ、中央寄せ——現在選択中の
+        // 段階（servantCommandCardAscension）のスロットにのみ反映する。
         const scale = Math.min(1, SERVANT_NP_ICON_W / img.naturalWidth, SERVANT_NP_ICON_H / img.naturalHeight);
-        servantNp.icon = img;
-        servantNp.iconNaturalW = img.naturalWidth;
-        servantNp.iconNaturalH = img.naturalHeight;
-        servantNp.iconOffsetX = 0;
-        servantNp.iconOffsetY = -50;
-        servantNp.iconScale = scale;
+        const npIconData = currentNpIconData();
+        npIconData.icon = img;
+        npIconData.iconNaturalW = img.naturalWidth;
+        npIconData.iconNaturalH = img.naturalHeight;
+        npIconData.iconOffsetX = 0;
+        npIconData.iconOffsetY = -50;
+        npIconData.iconScale = scale;
         renderAll();
       };
       img.src = url;
     }
     e.target.value = "";
+  });
+
+  // 宝具のキャラ画像選択（第１〜第３段階タブ）——プレビュー側の同名
+  // ボタンと状態(servantCommandCardAscension)を共有するsetServantCommandCardAscension
+  // 経由で切り替える。
+  servantNpIconStageTabs.querySelectorAll(".mode-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setServantCommandCardAscension(Number(btn.dataset.stage));
+    });
   });
 
   // 宝具アイコンの文字調整——スライダー・数値の相互同期は他の項目と同じ
@@ -6985,6 +7042,11 @@
   servantNextLevelExpToggle.checked = servantStatus.showNextLevelExp;
   servantNextLevelExpToggle.addEventListener("change", (e) => {
     servantStatus.showNextLevelExp = e.target.checked;
+    renderAll();
+  });
+  servantBondNextExpToggle.checked = servantStatus.showBondNextExp;
+  servantBondNextExpToggle.addEventListener("change", (e) => {
+    servantStatus.showBondNextExp = e.target.checked;
     renderAll();
   });
 
@@ -7674,6 +7736,7 @@
         characterDetail: servant.characterDetail,
       },
       status: { ...servantStatus },
+      graphAscensionLinked: servantGraphAscensionLinked,
       // 霊基再臨4段階（第一/第二/第三/最終）それぞれのセイントグラフ画像。
       graphImagesByAscension: servantGraphImagesByAscension.map((images) =>
         images.map((gi) => ({
@@ -7706,12 +7769,14 @@
       })),
       noblePhantasm: {
         type: servantNp.type,
-        icon: servantNp.icon ? imageToDataURL(servantNp.icon) : null,
-        iconNaturalW: servantNp.iconNaturalW,
-        iconNaturalH: servantNp.iconNaturalH,
-        iconOffsetX: servantNp.iconOffsetX,
-        iconOffsetY: servantNp.iconOffsetY,
-        iconScale: servantNp.iconScale,
+        iconsByStage: servantNp.iconsByStage.map((s) => ({
+          icon: s.icon ? imageToDataURL(s.icon) : null,
+          iconNaturalW: s.iconNaturalW,
+          iconNaturalH: s.iconNaturalH,
+          iconOffsetX: s.iconOffsetX,
+          iconOffsetY: s.iconOffsetY,
+          iconScale: s.iconScale,
+        })),
         rubyName: servantNp.rubyName,
         name: servantNp.name,
         rank: servantNp.rank,
@@ -7835,7 +7900,7 @@
     SERVANT_SIDE_OUTLINE_COLOR = isHexColor(s.sideOutlineColor) ? s.sideOutlineColor : "#033567";
     SERVANT_SIDE_ICON_ACTIVE_COLOR = isHexColor(s.sideIconActiveColor) ? s.sideIconActiveColor : "#ffffff";
     SERVANT_SIDE_TEXT_ACTIVE_COLOR = isHexColor(s.sideTextActiveColor) ? s.sideTextActiveColor : "#ffffff";
-    SERVANT_SIDE_OUTLINE_ACTIVE_COLOR = isHexColor(s.sideOutlineActiveColor) ? s.sideOutlineActiveColor : "#e8633d";
+    SERVANT_SIDE_OUTLINE_ACTIVE_COLOR = isHexColor(s.sideOutlineActiveColor) ? s.sideOutlineActiveColor : "#e66340";
     servantSideIconColorInput.value = SERVANT_SIDE_ICON_COLOR;
     servantSideTextColorInput.value = SERVANT_SIDE_TEXT_COLOR;
     servantSideOutlineColorInput.value = SERVANT_SIDE_OUTLINE_COLOR;
@@ -7895,6 +7960,7 @@
     servantStatus.currentExp = st.currentExp ?? servantStatus.currentExp;
     servantStatus.nextLevelExp = st.nextLevelExp ?? servantStatus.nextLevelExp;
     servantStatus.showNextLevelExp = st.showNextLevelExp ?? servantStatus.showNextLevelExp;
+    servantStatus.showBondNextExp = st.showBondNextExp ?? servantStatus.showBondNextExp;
     servantCurrentLevelInput.value = servantStatus.currentLevel;
     servantMaxLevelInput.value = servantStatus.maxLevel;
     servantAscensionInput.value = servantStatus.ascension;
@@ -7917,6 +7983,7 @@
     servantCurrentExpInput.value = servantStatus.currentExp;
     servantNextLevelExpInput.value = servantStatus.nextLevelExp;
     servantNextLevelExpToggle.checked = servantStatus.showNextLevelExp;
+    servantBondNextExpToggle.checked = servantStatus.showBondNextExp;
 
     // セイントグラフ画像（霊基再臨4段階分）——読み込みは非同期なので、
     // 全部読み終わってからまとめて置き換える。旧形式（graphImages、単一
@@ -7949,6 +8016,15 @@
     } catch (err) {
       console.error(err);
     }
+    // リンクがONで保存されていた場合、第二・第三再臨は保存時点で第一再臨と
+    // 同じ内容のはずなので、そのまま同じ配列参照に揃え直す（以後の編集が
+    // 再び連動するように）。
+    servantGraphAscensionLinked = !!(data && data.graphAscensionLinked);
+    if (servantGraphAscensionLinked) {
+      servantGraphImagesByAscension[1] = servantGraphImagesByAscension[0];
+      servantGraphImagesByAscension[2] = servantGraphImagesByAscension[0];
+    }
+    servantGraphAscensionLinkToggle.checked = servantGraphAscensionLinked;
     renderServantGraphImageList();
 
     servantFaceSelected = false;
@@ -8011,24 +8087,29 @@
   async function loadServantNoblePhantasm(npData) {
     const nd = npData || {};
     servantNp.type = SERVANT_NP_TYPE_OPTIONS.some((t) => t.id === nd.type) ? nd.type : SERVANT_NP_TYPE_OPTIONS[0].id;
-    servantNp.icon = null;
-    servantNp.iconNaturalW = 0;
-    servantNp.iconNaturalH = 0;
-    servantNp.iconOffsetX = 0;
-    servantNp.iconOffsetY = 0;
-    servantNp.iconScale = 1;
-    if (nd.icon) {
-      try {
-        servantNp.icon = await loadImage(nd.icon);
-        servantNp.iconNaturalW = nd.iconNaturalW || 0;
-        servantNp.iconNaturalH = nd.iconNaturalH || 0;
-        servantNp.iconOffsetX = nd.iconOffsetX || 0;
-        servantNp.iconOffsetY = nd.iconOffsetY || 0;
-        servantNp.iconScale = nd.iconScale || 1;
-      } catch (err) {
-        console.error(err);
-      }
-    }
+    // 新形式(iconsByStage、第１〜第３段階それぞれ)を優先し、無ければ
+    // 旧形式（段階の概念が無い単一icon）を第１段階にだけ読み込む
+    // （後方互換——古い保存データにはiconsByStageが存在しない）。
+    const stageDataList = Array.isArray(nd.iconsByStage) ? nd.iconsByStage : [nd.icon ? nd : {}, {}, {}];
+    servantNp.iconsByStage = await Promise.all(
+      [0, 1, 2].map(async (i) => {
+        const sd = stageDataList[i] || {};
+        const entry = createServantNpIconStageEntry();
+        if (sd.icon) {
+          try {
+            entry.icon = await loadImage(sd.icon);
+            entry.iconNaturalW = sd.iconNaturalW || 0;
+            entry.iconNaturalH = sd.iconNaturalH || 0;
+            entry.iconOffsetX = sd.iconOffsetX || 0;
+            entry.iconOffsetY = sd.iconOffsetY || 0;
+            entry.iconScale = sd.iconScale || 1;
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        return entry;
+      })
+    );
     servantNp.rubyName = nd.rubyName || "";
     servantNp.name = nd.name || "";
     servantNp.rank = nd.rank || ""; // 自由記入なので候補一覧との一致チェックはしない
@@ -9330,7 +9411,7 @@
   // 変更できる。アイコン色は元のアイコン画像（白抜き）のシルエットを
   // この色で塗りつぶす（drawImageContainOutlinedのfillColor参照）。
   let SERVANT_SIDE_OUTLINE_COLOR = "#033567";
-  let SERVANT_SIDE_OUTLINE_ACTIVE_COLOR = "#e8633d"; // アイコン文字の縁取り——有効時はこちら
+  let SERVANT_SIDE_OUTLINE_ACTIVE_COLOR = "#e66340"; // アイコン文字の縁取り——有効時はこちら
   let SERVANT_SIDE_ICON_COLOR = "#ffffff";
   let SERVANT_SIDE_ICON_ACTIVE_COLOR = "#ffffff";
   let SERVANT_SIDE_TEXT_COLOR = "#ffffff";
@@ -9706,9 +9787,79 @@
     const cardH = cardW * SERVANT_COMMAND_CARD_ASPECT;
     return { pad, cardW, cardH, advanceX };
   }
+  // コマンドカードウインドウ下の「第１〜第３再臨」切り替えボタン——
+  // sv_button_hex(_active).pngを背景に、他のタブボタンと同じ文字色/縁取り/
+  // フォントで「第１再臨」等を表示する。3つのうち常に1つだけがアクティブ
+  // （servantCommandCardAscension、既定は1）。
+  let servantCommandCardAscension = 1; // 1〜3
+  // この段階の値は、コマンドカード下のプレビューボタン・コンソールの
+  // 「第１〜第３段階」タブ（宝具のキャラ画像選択欄）の両方から変更でき、
+  // どちらを操作しても連動する——必ずこの関数経由で変更する。
+  function setServantCommandCardAscension(stage) {
+    servantCommandCardAscension = stage;
+    if (servantNpIconStageTabs) {
+      servantNpIconStageTabs.querySelectorAll(".mode-tab").forEach((btn) => {
+        btn.classList.toggle("is-active", Number(btn.dataset.stage) === stage);
+      });
+    }
+    renderAll();
+  }
+  const SERVANT_COMMAND_CARD_ASCENSION_LABELS = ["第１段階", "第２段階", "第３段階"];
+  const SERVANT_COMMAND_CARD_ASCENSION_GAP = 13;
+  // sv_button_hex.pngの実寸(350×145)比率のまま、幅・高さそれぞれ自由に
+  // 調整できるようにしておく（コマンドカードウインドウの幅いっぱいに
+  // 引き伸ばすのではなく、固定サイズで中央寄せにする）。
+  const SERVANT_COMMAND_CARD_ASCENSION_BUTTON_W = 210;
+  const SERVANT_COMMAND_CARD_ASCENSION_BUTTON_H = 95;
+  const SERVANT_COMMAND_CARD_ASCENSION_FONT_SIZE = 25;
+  const SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD = -14; // カード絵柄の下端からボタン行までの間隔——カードに近づけて詰める
+  function getServantCommandCardAscensionButtonLayout(x, y, w) {
+    const count = SERVANT_COMMAND_CARD_ASCENSION_LABELS.length;
+    const buttonW = SERVANT_COMMAND_CARD_ASCENSION_BUTTON_W;
+    const totalW = buttonW * count + SERVANT_COMMAND_CARD_ASCENSION_GAP * (count - 1);
+    return {
+      x: x + (w - totalW) / 2,
+      y,
+      w: buttonW,
+      h: SERVANT_COMMAND_CARD_ASCENSION_BUTTON_H,
+      advanceX: buttonW + SERVANT_COMMAND_CARD_ASCENSION_GAP,
+    };
+  }
+  // ボタンの下に添える注記2行——「保有スキル」「クラススキル」の説明文
+  // (SERVANT_SKILL_DESC_FONT、22px)と同じ文字サイズ、水色で中央揃え。
+  const SERVANT_COMMAND_CARD_NOTE_LINES = [
+    "※霊基再臨することでコマンドカードの絵柄を選べるようになります。",
+    "（絵柄を変更しても、ステータスが下がることはありません）",
+  ];
+  const SERVANT_COMMAND_CARD_NOTE_TOP_PAD = 10; // ボタン行の下端から注記1行目までの間隔
+  const SERVANT_COMMAND_CARD_NOTE_FONT_SIZE = 20; // 保有スキル等の説明文と同じサイズ
+  const SERVANT_COMMAND_CARD_NOTE_LINE_H = 26; // 注記の行間（説明文と同じ値）
+  const SERVANT_COMMAND_CARD_NOTE_COLOR = "#00eaff"; // 水色——ATK/HP数値等と同系色
   function getServantCommandCardsWindowHeight() {
     const { cardH } = getServantCommandCardLayout(SERVANT_COMMAND_CARD_WINDOW_W);
-    return SERVANT_STATUS_HEADING_H + SERVANT_COMMAND_CARD_TOP_PAD + cardH + SERVANT_STATUS_PAD;
+    return (
+      SERVANT_STATUS_HEADING_H +
+      SERVANT_COMMAND_CARD_TOP_PAD +
+      cardH +
+      SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD +
+      SERVANT_COMMAND_CARD_ASCENSION_BUTTON_H +
+      SERVANT_COMMAND_CARD_NOTE_TOP_PAD +
+      SERVANT_COMMAND_CARD_NOTE_LINES.length * SERVANT_COMMAND_CARD_NOTE_LINE_H +
+      SERVANT_STATUS_PAD
+    );
+  }
+  // コマンドカードウインドウ自身の、今この瞬間の画面上での位置——
+  // getServantSkillsWindowRect等と同じ考え方で、直前（宝具）ウインドウの
+  // 位置+高さ+隙間から求める。クリック判定（ボタン行のヒットテスト）に使う。
+  function getServantCommandCardsWindowRect() {
+    const prevWin = getServantNpWindowRect();
+    const prevH = getServantNpWindowDynamicHeight();
+    return {
+      x: SERVANT_CONTENT_AREA.x,
+      y: prevWin.y + prevH + SERVANT_STATUS_SECTION_GAP,
+      w: SERVANT_COMMAND_CARD_WINDOW_W,
+      h: getServantCommandCardsWindowHeight(),
+    };
   }
 
   function servantStatusSectionHeight(label) {
@@ -10111,17 +10262,18 @@
     };
   }
 
-  // キャラ画像(servantNp.icon)のiconOffsetX/Yはアイコン枠の中心からの
+  // キャラ画像(currentNpIconData().icon)のiconOffsetX/Yはアイコン枠の中心からの
   // 相対値——顔画像・スキルアイコンと同じ考え方（枠自体はスクロールで
   // 動くので、キャンバス絶対座標ではなく枠からの相対値として持たせる）。
   // 第2引数は、宝具アイコンとは異なるサイズの枠（コマンドカード等）に
   // 同じ見た目で使い回すための比例縮小率——省略時（宝具アイコン自身）は
   // 1のまま、つまり従来通りの計算になる。
   function servantSharedIconBBoxFor(box, scaleRatio = 1) {
-    const w = servantNp.iconNaturalW * servantNp.iconScale * scaleRatio;
-    const h = servantNp.iconNaturalH * servantNp.iconScale * scaleRatio;
-    const cx = box.x + box.w / 2 + servantNp.iconOffsetX * scaleRatio;
-    const cy = box.y + box.h / 2 + servantNp.iconOffsetY * scaleRatio;
+    const npIconData = currentNpIconData();
+    const w = npIconData.iconNaturalW * npIconData.iconScale * scaleRatio;
+    const h = npIconData.iconNaturalH * npIconData.iconScale * scaleRatio;
+    const cx = box.x + box.w / 2 + npIconData.iconOffsetX * scaleRatio;
+    const cy = box.y + box.h / 2 + npIconData.iconOffsetY * scaleRatio;
     return { left: cx - w / 2, top: cy - h / 2, w, h };
   }
   function servantNpIconBBox() {
@@ -10166,7 +10318,7 @@
   let servantNpIconDragStartDist = 0;
   let servantNpIconDragStartScale = 1;
   function handleServantNpIconPointerDown(pos, evt) {
-    if (servantActiveTab !== 0 || !servantNp.icon) return false;
+    if (servantActiveTab !== 0 || !currentNpIconData().icon) return false;
 
     if (servantNpIconSelected) {
       const handleIdx = hitServantNpIconHandleIndex(pos);
@@ -10179,7 +10331,7 @@
         servantNpIconDragAnchorX = gx > 0 ? left : left + w;
         servantNpIconDragAnchorY = gy > 0 ? top : top + h;
         servantNpIconDragStartDist = Math.hypot(pos.x - servantNpIconDragAnchorX, pos.y - servantNpIconDragAnchorY);
-        servantNpIconDragStartScale = servantNp.iconScale;
+        servantNpIconDragStartScale = currentNpIconData().iconScale;
         canvas.setPointerCapture(evt.pointerId);
         return true;
       }
@@ -10532,6 +10684,29 @@
   function currentServantGraphImages() {
     return servantGraphImagesByAscension[servantGraphAscensionIndex];
   }
+
+  // ONの間、第一〜第三再臨(index 0〜2)の画像状態を共有する——最終再臨
+  // (index 3)は対象外。共有は配列そのものを同じ参照にすることで実現する
+  // （push/splice/プロパティ変更等の既存のin-place編集がそのまま3段階に
+  // 反映される。配列を丸ごと差し替える操作だけは要注意——
+  // removeServantGraphImageもこのためsplice方式にしてある）。
+  let servantGraphAscensionLinked = false;
+  function setServantGraphAscensionLinked(linked) {
+    servantGraphAscensionLinked = linked;
+    if (linked) {
+      // 第一再臨の状態を第二・第三再臨へ共有する（既存の内容は上書きされる）
+      servantGraphImagesByAscension[1] = servantGraphImagesByAscension[0];
+      servantGraphImagesByAscension[2] = servantGraphImagesByAscension[0];
+    } else {
+      // 現在（共有中）の状態を維持したまま、3つを独立した配列に切り離す
+      const shared = servantGraphImagesByAscension[0];
+      servantGraphImagesByAscension[0] = shared.map((gi) => ({ ...gi }));
+      servantGraphImagesByAscension[1] = shared.map((gi) => ({ ...gi }));
+      servantGraphImagesByAscension[2] = shared.map((gi) => ({ ...gi }));
+    }
+    renderServantGraphImageList();
+    renderAll();
+  }
   let servantGraphNextId = 1;
   let servantSelectedGraphImageId = null;
   let servantGraphDragOffsetX = 0;
@@ -10802,7 +10977,11 @@
   }
 
   function removeServantGraphImage(id) {
-    servantGraphImagesByAscension[servantGraphAscensionIndex] = currentServantGraphImages().filter((g) => g.id !== id);
+    // 配列を丸ごと差し替えるとリンク中の他の再臨段階との共有参照が
+    // 切れてしまうため、spliceでin-place削除する（push/sortと同じ考え方）。
+    const images = currentServantGraphImages();
+    const idx = images.findIndex((g) => g.id === id);
+    if (idx !== -1) images.splice(idx, 1);
     if (servantSelectedGraphImageId === id) servantSelectedGraphImageId = null;
     renderServantGraphImageList();
     renderAll();
@@ -11051,7 +11230,7 @@
       }
     }
 
-    if (servantNpIconSelected && servantNp.icon && servantActiveTab === 0) {
+    if (servantNpIconSelected && currentNpIconData().icon && servantActiveTab === 0) {
       const { left, top, w, h } = servantNpIconBBox();
       drawSelectionHandlesOverlay(context, left, top, w, h, getServantNpIconResizeHandlePoints());
     }
@@ -11398,15 +11577,13 @@
       // textBaseline:"middle"だと見た目には少し上寄りになるため、
       // 数px下げて視覚的な中央に近づける
       const labelY = ty + SERVANT_TAB_BUTTON_H / 2 + 3;
-      if (!isActive) {
-        // 非選択タブは薄くするのではなく、サイドボタンと同じ縁取りで見せる
-        // ——配色自体もサイドボタンと共通の設定（各種設定→サイドボタン・
-        // タブボタン）を使う。
-        context.lineJoin = "round";
-        context.lineWidth = 3;
-        context.strokeStyle = SERVANT_SIDE_OUTLINE_COLOR;
-        context.strokeText(label, labelX, labelY);
-      }
+      // 非選択タブも選択中タブも、サイドボタンと同じ縁取りで見せる——
+      // 配色自体もサイドボタンと共通の設定（各種設定→サイドボタン・
+      // タブボタン）を使う。
+      context.lineJoin = "round";
+      context.lineWidth = 3;
+      context.strokeStyle = isActive ? SERVANT_SIDE_OUTLINE_ACTIVE_COLOR : SERVANT_SIDE_OUTLINE_COLOR;
+      context.strokeText(label, labelX, labelY);
       context.fillStyle = isActive ? SERVANT_SIDE_TEXT_ACTIVE_COLOR : SERVANT_SIDE_TEXT_COLOR;
       context.fillText(label, labelX, labelY);
       context.restore();
@@ -11868,10 +12045,14 @@
       context.font = statLabelFont;
       context.fillStyle = SERVANT_YELLOW_LABEL_COLOR;
       fillTextOutlined(context, "NEXT", nextLabelX, nextY, 3);
-      context.textAlign = "right";
-      context.font = secondaryValueFont;
-      context.fillStyle = "#ffffff";
-      fillTextOutlined(context, servantStatus.nextExp.toLocaleString(), nextRightX, nextY, 3);
+      // Lv.側のNEXT表示トグルとは違い、こちらはOFFでも「NEXT」の文字は
+      // 残したまま、数値部分だけを隠す（showBondNextExp参照）。
+      if (servantStatus.showBondNextExp) {
+        context.textAlign = "right";
+        context.font = secondaryValueFont;
+        context.fillStyle = "#ffffff";
+        fillTextOutlined(context, servantStatus.nextExp.toLocaleString(), nextRightX, nextY, 3);
+      }
 
       context.restore();
     }
@@ -12047,7 +12228,7 @@
       // 四方それぞれ、アイコン枠の端からどれだけはみ出して表示してよいかを
       // SERVANT_NP_ICON_CLIP_*で手動調整できる（既定は下端だけ0=_base画像の
       // 下端で切る、それ以外は大きめの値=実質はみ出し自由）。
-      if (servantNp.icon) {
+      if (currentNpIconData().icon) {
         context.save();
         context.beginPath();
         context.rect(
@@ -12058,7 +12239,7 @@
         );
         context.clip();
         const { left, top, w: bw, h: bh } = servantNpIconBBox();
-        context.drawImage(servantNp.icon, left, top, bw, bh);
+        context.drawImage(currentNpIconData().icon, left, top, bw, bh);
         context.restore();
       }
 
@@ -12286,12 +12467,14 @@
     // コマンドカード5枚——左からクイック→アーツ→バスターの順（内訳は
     // クイック・アーツの枚数指定で自由に決まる）。1枚ごとに
     // ①card_icon_*（背面）→②アップロード画像（宝具アイコンと同じ
-    // servantNp.icon・同じ位置/クリップ設定をカードのサイズに比例縮小した
-    // もの）→③card_over_*（前面、種別ロゴ）の3層を重ねる。
+    // currentNpIconData().icon・同じ位置/クリップ設定をカードのサイズに
+    // 比例縮小したもの——現在選択中の再臨段階のキャラ画像が使われる）
+    // →③card_over_*（前面、種別ロゴ）の3層を重ねる。
     function drawServantCommandCardsContent(x, y, w, h) {
       const { pad, cardW, cardH, advanceX } = getServantCommandCardLayout(w);
       const cardY = y + SERVANT_STATUS_HEADING_H + SERVANT_COMMAND_CARD_TOP_PAD;
       const scaleRatio = cardW / SERVANT_NP_ICON_W;
+      const npIconData = currentNpIconData();
       // 可視絵柄の左端がpadに来るよう、画像自体の左マージン分だけ先頭を
       // 左にずらす（本家の手札のようにカード同士が重なる配置になる）
       let cardX = x + pad - cardW * SERVANT_COMMAND_CARD_VISIBLE_LEFT_FRAC;
@@ -12303,7 +12486,7 @@
         } else {
           drawPlaceholderBox(context, cardX, cardY, cardW, cardH, "", { fontSize: 11 });
         }
-        if (servantNp.icon) {
+        if (npIconData.icon) {
           context.save();
           context.beginPath();
           context.rect(
@@ -12314,7 +12497,7 @@
           );
           context.clip();
           const { left, top, w: bw, h: bh } = servantSharedIconBBoxFor({ x: cardX, y: cardY, w: cardW, h: cardH }, scaleRatio);
-          context.drawImage(servantNp.icon, left, top, bw, bh);
+          context.drawImage(npIconData.icon, left, top, bw, bh);
           context.restore();
         }
         const overImg = assets[opt.overAssetKey];
@@ -12323,6 +12506,55 @@
         }
         cardX += advanceX;
       });
+
+      // 第１〜第３再臨切り替えボタン——文字色/縁取り/背景の色相回転は、
+      // 各種設定の「ボタン」（サイド/タブボタンと共通）をそのまま使う。
+      // フォントだけLateMin（bodyFontStack）にする。背景はsv_button_hex
+      // (_active).png。3つのうち常に1つだけがアクティブ
+      // (servantCommandCardAscension)。
+      const ascButtonY = cardY + cardH + SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD;
+      const ascLayout = getServantCommandCardAscensionButtonLayout(x, ascButtonY, w);
+      SERVANT_COMMAND_CARD_ASCENSION_LABELS.forEach((label, i) => {
+        const bx = ascLayout.x + i * ascLayout.advanceX;
+        const isActive = servantCommandCardAscension === i + 1;
+        const bgImg = isActive ? assets.svButtonHexActive : assets.svButtonHex;
+        const bgHue = isActive ? SERVANT_BUTTON_BG_ACTIVE_HUE : SERVANT_BUTTON_BG_HUE;
+        if (bgImg) {
+          context.save();
+          context.filter = bgHue ? `hue-rotate(${bgHue}deg)` : "none";
+          context.drawImage(bgImg, bx, ascLayout.y, ascLayout.w, ascLayout.h);
+          context.restore();
+        } else {
+          drawPlaceholderBox(context, bx, ascLayout.y, ascLayout.w, ascLayout.h, "", {});
+        }
+        context.save();
+        context.font = SERVANT_COMMAND_CARD_ASCENSION_FONT_SIZE + "px " + bodyFontStack();
+        context.textAlign = "center";
+        context.textBaseline = "middle";
+        const labelX = bx + ascLayout.w / 2;
+        const labelY = ascLayout.y + ascLayout.h / 2 + 1;
+        context.lineJoin = "round";
+        context.lineWidth = 3;
+        context.strokeStyle = isActive ? SERVANT_SIDE_OUTLINE_ACTIVE_COLOR : SERVANT_SIDE_OUTLINE_COLOR;
+        context.strokeText(label, labelX, labelY);
+        context.fillStyle = isActive ? SERVANT_SIDE_TEXT_ACTIVE_COLOR : SERVANT_SIDE_TEXT_COLOR;
+        context.fillText(label, labelX, labelY);
+        context.restore();
+      });
+
+      // ボタン下の注記2行——保有スキル等の説明文と同じフォントサイズ・
+      // 水色、中央揃え。
+      context.save();
+      context.font = SERVANT_COMMAND_CARD_NOTE_FONT_SIZE + "px " + bodyFontStack();
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillStyle = SERVANT_COMMAND_CARD_NOTE_COLOR;
+      const noteMidX = x + w / 2;
+      const noteStartY = ascLayout.y + ascLayout.h + SERVANT_COMMAND_CARD_NOTE_TOP_PAD + SERVANT_COMMAND_CARD_NOTE_LINE_H / 2;
+      SERVANT_COMMAND_CARD_NOTE_LINES.forEach((line, li) => {
+        fillTextOutlined(context, line, noteMidX, noteStartY + li * SERVANT_COMMAND_CARD_NOTE_LINE_H, 2);
+      });
+      context.restore();
     }
 
     // 「イラストレーター・声優」ウインドウ——ILLUST:／CV:の2行のみ。
@@ -12612,6 +12844,21 @@
         servantActiveTab = i;
         renderAll();
         return true;
+      }
+    }
+
+    if (servantActiveTab === 0) {
+      const ccWin = getServantCommandCardsWindowRect();
+      const { cardH } = getServantCommandCardLayout(ccWin.w);
+      const cardY = ccWin.y + SERVANT_STATUS_HEADING_H + SERVANT_COMMAND_CARD_TOP_PAD;
+      const ascButtonY = cardY + cardH + SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD;
+      const ascLayout = getServantCommandCardAscensionButtonLayout(ccWin.x, ascButtonY, ccWin.w);
+      for (let i = 0; i < SERVANT_COMMAND_CARD_ASCENSION_LABELS.length; i++) {
+        const bx = ascLayout.x + i * ascLayout.advanceX;
+        if (hitRect(pos, bx, ascLayout.y, ascLayout.w, ascLayout.h)) {
+          setServantCommandCardAscension(i + 1);
+          return true;
+        }
       }
     }
 
