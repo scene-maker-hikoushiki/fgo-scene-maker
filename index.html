@@ -1197,10 +1197,22 @@
         <button type="button" class="btn btn--sm" id="servantProfileExtraAddBtn" style="width:100%; margin-top:20px;">＋ プロフィールウインドウを追加</button>
       </details>
 
-      <!-- バトルキャラ（キャンバス側の「バトルキャラ」タブに対応） -->
+      <!-- バトルキャラ（キャンバス側の「バトルキャラ」タブに対応）——
+           専用のウインドウは無く、画像を右中央にそのまま表示するだけ。
+           宝具のキャラ画像と同じく再臨の第１〜第３段階ごとに個別の画像を
+           持ち、タブとプレビュー右下の縦並びボタンが連動する
+           （servantCommandCardAscensionを共有）。 -->
       <details class="panel">
         <summary><h2 class="panel__title">バトルキャラ</h2></summary>
-        <p class="mode-page__placeholder">項目は準備中です。</p>
+        <div class="mode-tabs" id="servantBattleCharStageTabs" style="padding: 0; border-bottom: none; margin: 0 0 10px;">
+          <button type="button" class="mode-tab is-active" data-stage="1">第１段階</button>
+          <button type="button" class="mode-tab" data-stage="2">第２段階</button>
+          <button type="button" class="mode-tab" data-stage="3">第３段階</button>
+        </div>
+        <label class="filebtn" id="servantBattleCharLabel">
+          <input type="file" id="servantBattleCharInput" accept="image/*" hidden>
+          <span>バトルキャラ画像を選択</span>
+        </label>
       </details>
 
       <!-- ボイス（キャンバス側の「ボイス」タブに対応） -->

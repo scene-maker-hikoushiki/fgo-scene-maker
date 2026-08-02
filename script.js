@@ -528,6 +528,8 @@
   const servantNpTypeSelect = document.getElementById("servantNpTypeSelect");
   const servantNpIconInput = document.getElementById("servantNpIconInput");
   const servantNpIconStageTabs = document.getElementById("servantNpIconStageTabs");
+  const servantBattleCharStageTabs = document.getElementById("servantBattleCharStageTabs");
+  const servantBattleCharInput = document.getElementById("servantBattleCharInput");
   const servantNpRubyInput = document.getElementById("servantNpRubyInput");
   const servantNpNameInput = document.getElementById("servantNpNameInput");
   const servantNpRankSelect = document.getElementById("servantNpRankSelect");
@@ -974,16 +976,17 @@
   // 入力欄には影響しない）。
   const SERVANT_NP_PREVIEW_NAME = "約束された\n勝利の剣";
   const SERVANT_NP_PREVIEW_RUBY = "エクスカリバー";
-  // キャラ画像（宝具アイコンに重ねる画像）は再臨の第１〜第３段階ごとに
-  // 個別の画像・位置・拡大率を持てる——添字0〜2がそのまま段階1〜3に対応
-  // する。今どの段階を編集/表示しているかはservantCommandCardAscension
-  // （プレビューの第１〜第３段階ボタン、コンソールのタブと共有）で決まる。
-  function createServantNpIconStageEntry() {
+  // 再臨の第１〜第３段階ごとに画像・位置・拡大率を個別に持たせる場合の
+  // 1段階ぶんのデータ——宝具のキャラ画像・バトルキャラ画像で共通利用する。
+  // 添字0〜2がそのまま段階1〜3に対応する。今どの段階を編集/表示している
+  // かはservantCommandCardAscension（プレビューの第１〜第３段階ボタン、
+  // コンソールのタブと共有）で決まる。
+  function createStageImageEntry() {
     return { icon: null, iconNaturalW: 0, iconNaturalH: 0, iconOffsetX: 0, iconOffsetY: 0, iconScale: 1 };
   }
   const servantNp = {
     type: SERVANT_NP_TYPE_OPTIONS[0].id,
-    iconsByStage: [createServantNpIconStageEntry(), createServantNpIconStageEntry(), createServantNpIconStageEntry()],
+    iconsByStage: [createStageImageEntry(), createStageImageEntry(), createStageImageEntry()],
     rubyName: "",
     name: "",
     rank: "",
@@ -998,6 +1001,15 @@
   // すべてこれ経由にする。
   function currentNpIconData() {
     return servantNp.iconsByStage[servantCommandCardAscension - 1];
+  }
+
+  // バトルキャラタブに表示する画像——宝具のキャラ画像と同じく、再臨の
+  // 第１〜第３段階ごとに個別の画像・位置・拡大率を持つ。
+  const servantBattleChar = {
+    iconsByStage: [createStageImageEntry(), createStageImageEntry(), createStageImageEntry()],
+  };
+  function currentBattleCharData() {
+    return servantBattleChar.iconsByStage[servantCommandCardAscension - 1];
   }
 
   // コマンドカード5枚——本家同様、左からクイック→アーツ→バスターの順に
@@ -4017,6 +4029,7 @@
       if (handleServantFacePointerDown(pos, evt)) return;
       if (handleServantSkillIconPointerDown(pos, evt)) return;
       if (handleServantNpIconPointerDown(pos, evt)) return;
+      if (handleServantBattleCharPointerDown(pos, evt)) return;
       if (hitRect(pos, SERVANT_CONTENT_AREA.x, SERVANT_CONTENT_AREA.y, SERVANT_CONTENT_AREA.w, SERVANT_CONTENT_AREA.h)) {
         servantScrollDragStartClientY = evt.clientY;
         servantScrollDragStartScroll = servantContentScroll[servantActiveTab];
@@ -4326,6 +4339,36 @@
       return;
     }
 
+    if (dragMode === "servant-battlechar-move") {
+      const pos = getCanvasPos(evt);
+      const box = getServantBattleCharBoxRect();
+      const newCenterX = pos.x - servantBattleCharDragOffsetX;
+      const newCenterY = pos.y - servantBattleCharDragOffsetY;
+      const battleCharData = currentBattleCharData();
+      battleCharData.iconOffsetX = newCenterX - (box.x + box.w / 2);
+      battleCharData.iconOffsetY = newCenterY - (box.y + box.h / 2);
+      renderAll();
+      return;
+    }
+
+    if (dragMode === "servant-battlechar-resize") {
+      const pos = getCanvasPos(evt);
+      const dist = Math.hypot(pos.x - servantBattleCharDragAnchorX, pos.y - servantBattleCharDragAnchorY);
+      const ratio = servantBattleCharDragStartDist > 1 ? dist / servantBattleCharDragStartDist : 1;
+      const newScale = Math.min(10, Math.max(0.02, servantBattleCharDragStartScale * ratio));
+      const battleCharData = currentBattleCharData();
+      const finalW = battleCharData.iconNaturalW * newScale;
+      const finalH = battleCharData.iconNaturalH * newScale;
+      const newCenterX = servantBattleCharDragAnchorX + (servantBattleCharDragGX * finalW) / 2;
+      const newCenterY = servantBattleCharDragAnchorY + (servantBattleCharDragGY * finalH) / 2;
+      const box = getServantBattleCharBoxRect();
+      battleCharData.iconScale = newScale;
+      battleCharData.iconOffsetX = newCenterX - (box.x + box.w / 2);
+      battleCharData.iconOffsetY = newCenterY - (box.y + box.h / 2);
+      renderAll();
+      return;
+    }
+
     if (dragMode === "servant-scrollbar") {
       const rect = canvas.getBoundingClientRect();
       const scaleY = canvas.height / rect.height;
@@ -4476,7 +4519,9 @@
       dragMode === "servant-skill-move" ||
       dragMode === "servant-skill-resize" ||
       dragMode === "servant-np-move" ||
-      dragMode === "servant-np-resize"
+      dragMode === "servant-np-resize" ||
+      dragMode === "servant-battlechar-move" ||
+      dragMode === "servant-battlechar-resize"
     ) {
       dragMode = null;
       snapGuideX = null;
@@ -6806,6 +6851,37 @@
     });
   });
 
+  // バトルキャラ画像——宝具のキャラ画像と全く同じ考え方で、第１〜第３段階
+  // タブとプレビュー右下のボタンが同じ状態(servantCommandCardAscension)を
+  // 共有する。
+  servantBattleCharStageTabs.querySelectorAll(".mode-tab").forEach((btn) => {
+    btn.addEventListener("click", () => {
+      setServantCommandCardAscension(Number(btn.dataset.stage));
+    });
+  });
+  servantBattleCharInput.addEventListener("change", (e) => {
+    const file = e.target.files[0];
+    if (file) {
+      const url = URL.createObjectURL(file);
+      const img = new Image();
+      img.onload = () => {
+        // 初期表示はコンテンツエリアに収まる程度のサイズ、中央寄せ——
+        // 現在選択中の段階のスロットにのみ反映する。
+        const scale = Math.min(1, SERVANT_CONTENT_AREA.w / img.naturalWidth, SERVANT_CONTENT_AREA.h / img.naturalHeight);
+        const battleCharData = currentBattleCharData();
+        battleCharData.icon = img;
+        battleCharData.iconNaturalW = img.naturalWidth;
+        battleCharData.iconNaturalH = img.naturalHeight;
+        battleCharData.iconOffsetX = 0;
+        battleCharData.iconOffsetY = 0;
+        battleCharData.iconScale = scale;
+        renderAll();
+      };
+      img.src = url;
+    }
+    e.target.value = "";
+  });
+
   // 宝具アイコンの文字調整——スライダー・数値の相互同期は他の項目と同じ
   // 考え方。対象はモジュール直下のlet変数(SERVANT_NP_ICON_*)そのものを
   // 書き換える（servant等のオブジェクト経由ではない点に注意）。
@@ -7767,6 +7843,16 @@
         locked: !!entry.locked,
         lockCondition: entry.lockCondition || "",
       })),
+      battleChar: {
+        iconsByStage: servantBattleChar.iconsByStage.map((s) => ({
+          icon: s.icon ? imageToDataURL(s.icon) : null,
+          iconNaturalW: s.iconNaturalW,
+          iconNaturalH: s.iconNaturalH,
+          iconOffsetX: s.iconOffsetX,
+          iconOffsetY: s.iconOffsetY,
+          iconScale: s.iconScale,
+        })),
+      },
       noblePhantasm: {
         type: servantNp.type,
         iconsByStage: servantNp.iconsByStage.map((s) => ({
@@ -8031,6 +8117,7 @@
     servantSelectedSkillKind = null;
     servantSelectedSkillIndex = null;
     servantNpIconSelected = false;
+    servantBattleCharSelected = false;
     if (data && data.face && data.face.img) {
       try {
         const faceImg = await loadImage(data.face.img);
@@ -8066,6 +8153,8 @@
     renderServantProfileExtraList();
     // 宝具——アイコン(キャラ画像)の読み込みだけ非同期
     await loadServantNoblePhantasm((data && data.noblePhantasm) || null);
+    // バトルキャラ画像（再臨の第１〜第３段階ごと）
+    await loadServantBattleChar((data && data.battleChar) || null);
 
     // コマンドカード（クイック・アーツの枚数、バスターは残りで自動計算）——
     // 保存データが無い/不正な場合は既定値のまま
@@ -8094,7 +8183,7 @@
     servantNp.iconsByStage = await Promise.all(
       [0, 1, 2].map(async (i) => {
         const sd = stageDataList[i] || {};
-        const entry = createServantNpIconStageEntry();
+        const entry = createStageImageEntry();
         if (sd.icon) {
           try {
             entry.icon = await loadImage(sd.icon);
@@ -8160,6 +8249,32 @@
     servantNpIconAlignSelect.value = SERVANT_NP_ICON_TEXT_ALIGN_MODE;
     servantNpIconTextOffsetXInput.value = SERVANT_NP_ICON_TEXT_OFFSET_X;
     servantNpIconTextOffsetXNumber.value = SERVANT_NP_ICON_TEXT_OFFSET_X;
+  }
+
+  // バトルキャラ画像（再臨の第１〜第３段階ごと）——宝具のキャラ画像と
+  // 全く同じ考え方（iconsByStage、後方互換は不要——この機能自体が新規）。
+  async function loadServantBattleChar(battleCharData) {
+    const bd = battleCharData || {};
+    const stageDataList = Array.isArray(bd.iconsByStage) ? bd.iconsByStage : [{}, {}, {}];
+    servantBattleChar.iconsByStage = await Promise.all(
+      [0, 1, 2].map(async (i) => {
+        const sd = stageDataList[i] || {};
+        const entry = createStageImageEntry();
+        if (sd.icon) {
+          try {
+            entry.icon = await loadImage(sd.icon);
+            entry.iconNaturalW = sd.iconNaturalW || 0;
+            entry.iconNaturalH = sd.iconNaturalH || 0;
+            entry.iconOffsetX = sd.iconOffsetX || 0;
+            entry.iconOffsetY = sd.iconOffsetY || 0;
+            entry.iconScale = sd.iconScale || 1;
+          } catch (err) {
+            console.error(err);
+          }
+        }
+        return entry;
+      })
+    );
   }
 
   async function loadServantClassSkillEntries(skillsData) {
@@ -9797,11 +9912,12 @@
   // どちらを操作しても連動する——必ずこの関数経由で変更する。
   function setServantCommandCardAscension(stage) {
     servantCommandCardAscension = stage;
-    if (servantNpIconStageTabs) {
-      servantNpIconStageTabs.querySelectorAll(".mode-tab").forEach((btn) => {
+    [servantNpIconStageTabs, servantBattleCharStageTabs].forEach((tabsEl) => {
+      if (!tabsEl) return;
+      tabsEl.querySelectorAll(".mode-tab").forEach((btn) => {
         btn.classList.toggle("is-active", Number(btn.dataset.stage) === stage);
       });
-    }
+    });
     renderAll();
   }
   const SERVANT_COMMAND_CARD_ASCENSION_LABELS = ["第１段階", "第２段階", "第３段階"];
@@ -9813,6 +9929,35 @@
   const SERVANT_COMMAND_CARD_ASCENSION_BUTTON_H = 95;
   const SERVANT_COMMAND_CARD_ASCENSION_FONT_SIZE = 25;
   const SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD = -14; // カード絵柄の下端からボタン行までの間隔——カードに近づけて詰める
+  // 再臨段階選択ボタンの見た目——コマンドカード下の横並び・バトルキャラ
+  // タブの縦並びの両方で共有する。文字色/縁取り/背景の色相回転は各種設定
+  // の「ボタン」（サイド/タブボタンと共通）をそのまま使い、フォントだけ
+  // LateMin（bodyFontStack）にする。背景はsv_button_hex(_active).png。
+  function drawServantAscensionButton(context, bx, by, bw, bh, label, isActive) {
+    const bgImg = isActive ? assets.svButtonHexActive : assets.svButtonHex;
+    const bgHue = isActive ? SERVANT_BUTTON_BG_ACTIVE_HUE : SERVANT_BUTTON_BG_HUE;
+    if (bgImg) {
+      context.save();
+      context.filter = bgHue ? `hue-rotate(${bgHue}deg)` : "none";
+      context.drawImage(bgImg, bx, by, bw, bh);
+      context.restore();
+    } else {
+      drawPlaceholderBox(context, bx, by, bw, bh, "", {});
+    }
+    context.save();
+    context.font = SERVANT_COMMAND_CARD_ASCENSION_FONT_SIZE + "px " + bodyFontStack();
+    context.textAlign = "center";
+    context.textBaseline = "middle";
+    const labelX = bx + bw / 2;
+    const labelY = by + bh / 2 + 1;
+    context.lineJoin = "round";
+    context.lineWidth = 3;
+    context.strokeStyle = isActive ? SERVANT_SIDE_OUTLINE_ACTIVE_COLOR : SERVANT_SIDE_OUTLINE_COLOR;
+    context.strokeText(label, labelX, labelY);
+    context.fillStyle = isActive ? SERVANT_SIDE_TEXT_ACTIVE_COLOR : SERVANT_SIDE_TEXT_COLOR;
+    context.fillText(label, labelX, labelY);
+    context.restore();
+  }
   function getServantCommandCardAscensionButtonLayout(x, y, w) {
     const count = SERVANT_COMMAND_CARD_ASCENSION_LABELS.length;
     const buttonW = SERVANT_COMMAND_CARD_ASCENSION_BUTTON_W;
@@ -9860,6 +10005,128 @@
       w: SERVANT_COMMAND_CARD_WINDOW_W,
       h: getServantCommandCardsWindowHeight(),
     };
+  }
+
+  // バトルキャラタブ——専用のウインドウは持たず、コンテンツエリアに
+  // バトルキャラ画像をそのまま表示するだけ（右中央＝コンテンツエリア内で
+  // 中央寄せ）。右下に、コマンドカードの再臨段階ボタンと全く同じ配色・
+  // ラベルのボタンを縦に3つ並べる（横並びのgetServantCommandCard
+  // AscensionButtonLayoutと対になる構成）。
+  const SERVANT_BATTLE_CHAR_BUTTON_GAP = -18;
+  const SERVANT_BATTLE_CHAR_BUTTON_RIGHT_PAD = 0;
+  const SERVANT_BATTLE_CHAR_BUTTON_BOTTOM_PAD = 110;
+  function getServantBattleCharButtonLayout() {
+    const count = SERVANT_COMMAND_CARD_ASCENSION_LABELS.length;
+    const buttonW = SERVANT_COMMAND_CARD_ASCENSION_BUTTON_W;
+    const buttonH = SERVANT_COMMAND_CARD_ASCENSION_BUTTON_H;
+    const totalH = buttonH * count + SERVANT_BATTLE_CHAR_BUTTON_GAP * (count - 1);
+    const y = SERVANT_CONTENT_AREA.y + SERVANT_CONTENT_AREA.h - SERVANT_BATTLE_CHAR_BUTTON_BOTTOM_PAD - totalH;
+    return {
+      x: SERVANT_CONTENT_AREA.x + SERVANT_CONTENT_AREA.w - SERVANT_BATTLE_CHAR_BUTTON_RIGHT_PAD - buttonW,
+      y,
+      w: buttonW,
+      h: buttonH,
+      advanceY: buttonH + SERVANT_BATTLE_CHAR_BUTTON_GAP,
+      bottom: y + totalH,
+    };
+  }
+  // 上のタブボタン（ステータス/プロフィール/バトルキャラ/ボイス）の下、
+  // コンテンツエリア最上部に添える注記2行——コマンドカードの注記
+  // (SERVANT_COMMAND_CARD_NOTE_*)と同じ文字サイズ・色をそのまま流用し、
+  // コンテンツエリア幅の中央に揃える。
+  const SERVANT_BATTLE_CHAR_NOTE_LINES = [
+    "※霊基再臨することでバトル時の姿を選べるようになります。",
+    "（姿を変更しても、ステータスが下がることはありません）",
+  ];
+  const SERVANT_BATTLE_CHAR_NOTE_TOP_PAD = 5; // コンテンツエリア上端から注記1行目までの間隔
+
+  // バトルキャラ画像の枠——専用ウインドウが無いため、コンテンツエリア
+  // 自体を枠として扱う（宝具アイコン等のgetServant*IconBoxRectと同じ
+  // 考え方）。iconOffsetX/Y・iconScaleはこの枠の中心からの相対値。
+  function getServantBattleCharBoxRect() {
+    return SERVANT_CONTENT_AREA;
+  }
+  function servantBattleCharBBox() {
+    return servantSharedIconBBoxFor(getServantBattleCharBoxRect(), 1, currentBattleCharData());
+  }
+
+  function getServantBattleCharResizeHandlePoints() {
+    const { left, top, w, h } = servantBattleCharBBox();
+    return [
+      { x: left, y: top },
+      { x: left + w, y: top },
+      { x: left, y: top + h },
+      { x: left + w, y: top + h },
+    ];
+  }
+
+  function hitServantBattleCharHandleIndex(pos) {
+    const points = getServantBattleCharResizeHandlePoints();
+    for (let i = 0; i < points.length; i++) {
+      const p = points[i];
+      if (
+        pos.x >= p.x - HANDLE_SIZE / 2 - 6 &&
+        pos.x <= p.x + HANDLE_SIZE / 2 + 6 &&
+        pos.y >= p.y - HANDLE_SIZE / 2 - 6 &&
+        pos.y <= p.y + HANDLE_SIZE / 2 + 6
+      ) {
+        return i;
+      }
+    }
+    return -1;
+  }
+
+  // クリック/ドラッグ開始を処理する。trueを返したら処理済み。
+  // バトルキャラタブを見ている時、かつ画像がある時だけ意味を持つ。
+  let servantBattleCharSelected = false;
+  let servantBattleCharDragOffsetX = 0;
+  let servantBattleCharDragOffsetY = 0;
+  let servantBattleCharDragGX = 0;
+  let servantBattleCharDragGY = 0;
+  let servantBattleCharDragAnchorX = 0;
+  let servantBattleCharDragAnchorY = 0;
+  let servantBattleCharDragStartDist = 0;
+  let servantBattleCharDragStartScale = 1;
+  function handleServantBattleCharPointerDown(pos, evt) {
+    if (servantActiveTab !== 2 || !currentBattleCharData().icon) return false;
+
+    if (servantBattleCharSelected) {
+      const handleIdx = hitServantBattleCharHandleIndex(pos);
+      if (handleIdx !== -1) {
+        const [gx, gy] = HANDLE_MULTIPLIERS[handleIdx];
+        const { left, top, w, h } = servantBattleCharBBox();
+        dragMode = "servant-battlechar-resize";
+        servantBattleCharDragGX = gx;
+        servantBattleCharDragGY = gy;
+        servantBattleCharDragAnchorX = gx > 0 ? left : left + w;
+        servantBattleCharDragAnchorY = gy > 0 ? top : top + h;
+        servantBattleCharDragStartDist = Math.hypot(pos.x - servantBattleCharDragAnchorX, pos.y - servantBattleCharDragAnchorY);
+        servantBattleCharDragStartScale = currentBattleCharData().iconScale;
+        canvas.setPointerCapture(evt.pointerId);
+        return true;
+      }
+    }
+
+    const bbox = servantBattleCharBBox();
+    // クリップと同じく、選択の当たり判定もキャンバス全体を対象にする
+    // （画面全体に拡大配置できるようにしたため、コンテンツエリア内に
+    // 限定しない）。
+    const visible = intersectBBoxWithVisibleRect(bbox, { x: 0, y: 0, w: CANVAS_W, h: CANVAS_H });
+    if (visible && hitRect(pos, visible.left, visible.top, visible.w, visible.h)) {
+      servantBattleCharSelected = true;
+      dragMode = "servant-battlechar-move";
+      servantBattleCharDragOffsetX = pos.x - (bbox.left + bbox.w / 2);
+      servantBattleCharDragOffsetY = pos.y - (bbox.top + bbox.h / 2);
+      canvas.setPointerCapture(evt.pointerId);
+      renderAll();
+      return true;
+    }
+
+    if (servantBattleCharSelected) {
+      servantBattleCharSelected = false;
+      renderAll();
+    }
+    return false;
   }
 
   function servantStatusSectionHeight(label) {
@@ -10268,12 +10535,11 @@
   // 第2引数は、宝具アイコンとは異なるサイズの枠（コマンドカード等）に
   // 同じ見た目で使い回すための比例縮小率——省略時（宝具アイコン自身）は
   // 1のまま、つまり従来通りの計算になる。
-  function servantSharedIconBBoxFor(box, scaleRatio = 1) {
-    const npIconData = currentNpIconData();
-    const w = npIconData.iconNaturalW * npIconData.iconScale * scaleRatio;
-    const h = npIconData.iconNaturalH * npIconData.iconScale * scaleRatio;
-    const cx = box.x + box.w / 2 + npIconData.iconOffsetX * scaleRatio;
-    const cy = box.y + box.h / 2 + npIconData.iconOffsetY * scaleRatio;
+  function servantSharedIconBBoxFor(box, scaleRatio = 1, data = currentNpIconData()) {
+    const w = data.iconNaturalW * data.iconScale * scaleRatio;
+    const h = data.iconNaturalH * data.iconScale * scaleRatio;
+    const cx = box.x + box.w / 2 + data.iconOffsetX * scaleRatio;
+    const cy = box.y + box.h / 2 + data.iconOffsetY * scaleRatio;
     return { left: cx - w / 2, top: cy - h / 2, w, h };
   }
   function servantNpIconBBox() {
@@ -11233,6 +11499,11 @@
     if (servantNpIconSelected && currentNpIconData().icon && servantActiveTab === 0) {
       const { left, top, w, h } = servantNpIconBBox();
       drawSelectionHandlesOverlay(context, left, top, w, h, getServantNpIconResizeHandlePoints());
+    }
+
+    if (servantBattleCharSelected && currentBattleCharData().icon && servantActiveTab === 2) {
+      const { left, top, w, h } = servantBattleCharBBox();
+      drawSelectionHandlesOverlay(context, left, top, w, h, getServantBattleCharResizeHandlePoints());
     }
 
     drawSnapGuides(context);
@@ -12507,39 +12778,13 @@
         cardX += advanceX;
       });
 
-      // 第１〜第３再臨切り替えボタン——文字色/縁取り/背景の色相回転は、
-      // 各種設定の「ボタン」（サイド/タブボタンと共通）をそのまま使う。
-      // フォントだけLateMin（bodyFontStack）にする。背景はsv_button_hex
-      // (_active).png。3つのうち常に1つだけがアクティブ
-      // (servantCommandCardAscension)。
+      // 第１〜第３再臨切り替えボタン——描画自体はdrawServantAscensionButton
+      // 共通関数（バトルキャラタブの縦並びボタンとも共有）。
       const ascButtonY = cardY + cardH + SERVANT_COMMAND_CARD_ASCENSION_TOP_PAD;
       const ascLayout = getServantCommandCardAscensionButtonLayout(x, ascButtonY, w);
       SERVANT_COMMAND_CARD_ASCENSION_LABELS.forEach((label, i) => {
         const bx = ascLayout.x + i * ascLayout.advanceX;
-        const isActive = servantCommandCardAscension === i + 1;
-        const bgImg = isActive ? assets.svButtonHexActive : assets.svButtonHex;
-        const bgHue = isActive ? SERVANT_BUTTON_BG_ACTIVE_HUE : SERVANT_BUTTON_BG_HUE;
-        if (bgImg) {
-          context.save();
-          context.filter = bgHue ? `hue-rotate(${bgHue}deg)` : "none";
-          context.drawImage(bgImg, bx, ascLayout.y, ascLayout.w, ascLayout.h);
-          context.restore();
-        } else {
-          drawPlaceholderBox(context, bx, ascLayout.y, ascLayout.w, ascLayout.h, "", {});
-        }
-        context.save();
-        context.font = SERVANT_COMMAND_CARD_ASCENSION_FONT_SIZE + "px " + bodyFontStack();
-        context.textAlign = "center";
-        context.textBaseline = "middle";
-        const labelX = bx + ascLayout.w / 2;
-        const labelY = ascLayout.y + ascLayout.h / 2 + 1;
-        context.lineJoin = "round";
-        context.lineWidth = 3;
-        context.strokeStyle = isActive ? SERVANT_SIDE_OUTLINE_ACTIVE_COLOR : SERVANT_SIDE_OUTLINE_COLOR;
-        context.strokeText(label, labelX, labelY);
-        context.fillStyle = isActive ? SERVANT_SIDE_TEXT_ACTIVE_COLOR : SERVANT_SIDE_TEXT_COLOR;
-        context.fillText(label, labelX, labelY);
-        context.restore();
+        drawServantAscensionButton(context, bx, ascLayout.y, ascLayout.w, ascLayout.h, label, servantCommandCardAscension === i + 1);
       });
 
       // ボタン下の注記2行——保有スキル等の説明文と同じフォントサイズ・
@@ -12718,10 +12963,17 @@
 
     // 中身はSERVANT_CONTENT_AREAの枠でクリップし、スクロール分だけ上へ
     // ずらして描く——エリアの外へ描画がはみ出さないようにする。
+    // バトルキャラタブだけは例外——専用のウインドウが無く、画像を画面
+    // 全体まで自由に拡大配置できるようにしたいので、クリップを掛けない
+    // （キャンバス全体をそのままクリップ領域にする）。
     const contentGeo = getServantContentGeometry();
     context.save();
     context.beginPath();
-    context.rect(SERVANT_CONTENT_AREA.x - 20, SERVANT_CONTENT_AREA.y, SERVANT_CONTENT_AREA.w + 40, SERVANT_CONTENT_AREA.h);
+    if (servantActiveTab === 2) {
+      context.rect(0, 0, CANVAS_W, CANVAS_H);
+    } else {
+      context.rect(SERVANT_CONTENT_AREA.x - 20, SERVANT_CONTENT_AREA.y, SERVANT_CONTENT_AREA.w + 40, SERVANT_CONTENT_AREA.h);
+    }
     context.clip();
 
     if (servantActiveTab === 0) {
@@ -12750,6 +13002,43 @@
         }
         sectionY += sectionH + SERVANT_STATUS_SECTION_GAP;
       });
+    } else if (servantActiveTab === 2) {
+      // バトルキャラタブ——専用のウインドウは持たず、画像をコンテンツ
+      // エリアにそのまま中央寄せ表示するだけ（右中央＝ウインドウが
+      // あった位置）。右下に再臨段階選択ボタンを縦に3つ並べる。
+      const battleCharData = currentBattleCharData();
+      if (battleCharData.icon) {
+        const { left, top, w: bw, h: bh } = servantBattleCharBBox();
+        context.drawImage(battleCharData.icon, left, top, bw, bh);
+      }
+      const battleCharBtnLayout = getServantBattleCharButtonLayout();
+      SERVANT_COMMAND_CARD_ASCENSION_LABELS.forEach((label, i) => {
+        const by = battleCharBtnLayout.y + i * battleCharBtnLayout.advanceY;
+        drawServantAscensionButton(
+          context,
+          battleCharBtnLayout.x,
+          by,
+          battleCharBtnLayout.w,
+          battleCharBtnLayout.h,
+          label,
+          servantCommandCardAscension === i + 1
+        );
+      });
+
+      // 上のタブボタン（ステータス/プロフィール/バトルキャラ/ボイス）の
+      // 下、コンテンツエリア最上部に添える注記2行——コマンドカードの注記と
+      // 同じフォントサイズ・色、コンテンツエリア幅の中央揃え。
+      context.save();
+      context.font = SERVANT_COMMAND_CARD_NOTE_FONT_SIZE + "px " + bodyFontStack();
+      context.textAlign = "center";
+      context.textBaseline = "middle";
+      context.fillStyle = SERVANT_COMMAND_CARD_NOTE_COLOR;
+      const bcNoteMidX = SERVANT_CONTENT_AREA.x + SERVANT_CONTENT_AREA.w / 2;
+      const bcNoteStartY = SERVANT_CONTENT_AREA.y + SERVANT_BATTLE_CHAR_NOTE_TOP_PAD + SERVANT_COMMAND_CARD_NOTE_LINE_H / 2;
+      SERVANT_BATTLE_CHAR_NOTE_LINES.forEach((line, li) => {
+        fillTextOutlined(context, line, bcNoteMidX, bcNoteStartY + li * SERVANT_COMMAND_CARD_NOTE_LINE_H, 3);
+      });
+      context.restore();
     } else {
       drawSvStatusWindow(
         SERVANT_CONTENT_AREA.x,
@@ -12856,6 +13145,17 @@
       for (let i = 0; i < SERVANT_COMMAND_CARD_ASCENSION_LABELS.length; i++) {
         const bx = ascLayout.x + i * ascLayout.advanceX;
         if (hitRect(pos, bx, ascLayout.y, ascLayout.w, ascLayout.h)) {
+          setServantCommandCardAscension(i + 1);
+          return true;
+        }
+      }
+    }
+
+    if (servantActiveTab === 2) {
+      const battleCharBtnLayout = getServantBattleCharButtonLayout();
+      for (let i = 0; i < SERVANT_COMMAND_CARD_ASCENSION_LABELS.length; i++) {
+        const by = battleCharBtnLayout.y + i * battleCharBtnLayout.advanceY;
+        if (hitRect(pos, battleCharBtnLayout.x, by, battleCharBtnLayout.w, battleCharBtnLayout.h)) {
           setServantCommandCardAscension(i + 1);
           return true;
         }
