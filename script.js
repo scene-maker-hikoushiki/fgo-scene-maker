@@ -765,27 +765,41 @@
     "svAppendSkillIcon5",
     "skillIconPreset6",
     "skillIconPreset7",
+    "skillIconPreset7a",
     "skillIconPreset8",
+    "skillIconPreset8a",
     "skillIconPreset9",
+    "skillIconPreset9a",
     "skillIconPreset10",
     "skillIconPreset11",
     "skillIconPreset12",
     "skillIconPreset13",
+    "skillIconPreset13a",
     "skillIconPreset14",
+    "skillIconPreset14a",
     "skillIconPreset15",
     "skillIconPreset16",
+    "skillIconPreset16a",
     "skillIconPreset17",
+    "skillIconPreset17a",
+    "skillIconPreset17b",
     "skillIconPreset18",
     "skillIconPreset19",
     "skillIconPreset20",
     "skillIconPreset21",
     "skillIconPreset22",
     "skillIconPreset23",
+    "skillIconPreset23a",
     "skillIconPreset24",
+    "skillIconPreset24a",
     "skillIconPreset25",
     "skillIconPreset26",
     "skillIconPreset27",
     "skillIconPreset28",
+    "skillIconPreset29",
+    "skillIconPreset30",
+    "skillIconPreset31",
+    "skillIconPreset32",
   ];
   // クラススキル専用（skill_class_番号）。
   const SERVANT_CLASS_SKILL_ICON_PRESET_KEYS_BASE = [
@@ -1278,27 +1292,41 @@
       "svAppendSkillIcon5",
       "skillIconPreset6",
       "skillIconPreset7",
+      "skillIconPreset7a",
       "skillIconPreset8",
+      "skillIconPreset8a",
       "skillIconPreset9",
+      "skillIconPreset9a",
       "skillIconPreset10",
       "skillIconPreset11",
       "skillIconPreset12",
       "skillIconPreset13",
+      "skillIconPreset13a",
       "skillIconPreset14",
+      "skillIconPreset14a",
       "skillIconPreset15",
       "skillIconPreset16",
+      "skillIconPreset16a",
       "skillIconPreset17",
+      "skillIconPreset17a",
+      "skillIconPreset17b",
       "skillIconPreset18",
       "skillIconPreset19",
       "skillIconPreset20",
       "skillIconPreset21",
       "skillIconPreset22",
       "skillIconPreset23",
+      "skillIconPreset23a",
       "skillIconPreset24",
+      "skillIconPreset24a",
       "skillIconPreset25",
       "skillIconPreset26",
       "skillIconPreset27",
       "skillIconPreset28",
+      "skillIconPreset29",
+      "skillIconPreset30",
+      "skillIconPreset31",
+      "skillIconPreset32",
       "skillClassIconPreset1",
       "skillClassIconPreset2",
       "skillClassIconPreset3",
@@ -7043,8 +7071,8 @@
   wireServantNumberInput(servantCostInput, "cost", 0, 99);
   wireServantNumberInput(servantHpInput, "hp", 1, 99999);
   wireServantNumberInput(servantAtkInput, "atk", 1, 99999);
-  wireServantNumberInput(servantHpBonusInput, "hpBonus", 0, 2000);
-  wireServantNumberInput(servantAtkBonusInput, "atkBonus", 0, 2000);
+  wireServantNumberInput(servantHpBonusInput, "hpBonus", 0, () => servantStatus.hpBonusMax);
+  wireServantNumberInput(servantAtkBonusInput, "atkBonus", 0, () => servantStatus.atkBonusMax);
   wireServantNumberInput(servantNpLevelInput, "npLevel", 0, () => servantStatus.npMaxLevel);
   wireServantNumberInput(servantNpMaxLevelInput, "npMaxLevel", 0, 4);
   wireServantNumberInput(servantSkillMaxLevelInput, "skillMaxLevel", 0, 4);
@@ -7126,7 +7154,7 @@
     renderAll();
   });
 
-  // HP/ATK強化最大は1000か2000の二択なので<select>にしている
+  // HP/ATK強化最大は1000/2000/3000の三択なので<select>にしている
   servantHpBonusMaxSelect.value = String(servantStatus.hpBonusMax);
   servantHpBonusMaxSelect.addEventListener("change", (e) => {
     servantStatus.hpBonusMax = Number(e.target.value);

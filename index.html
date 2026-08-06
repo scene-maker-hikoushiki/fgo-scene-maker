@@ -22,6 +22,11 @@
     </div>
 
     <div class="template-toolbar__row">
+      <button type="button" class="template-toolbar__btn" id="templateBtnLv">[Lv.n]</button>
+      <input type="number" class="field__input field__input--number field__input--number-small" id="templateLvInput" min="1" max="99" step="1" value="10">
+    </div>
+
+    <div class="template-toolbar__row">
       <button type="button" class="template-toolbar__btn" id="templateBtnTurn">(nターン)</button>
       <input type="number" class="field__input field__input--number field__input--number-small" id="templateTurnInput" min="1" max="99" step="1" value="3">
     </div>
@@ -30,11 +35,6 @@
       <button type="button" class="template-toolbar__btn" id="templateBtnCount">(n回・nターン)</button>
       <input type="number" class="field__input field__input--number field__input--number-small" id="templateCountInput" min="1" max="99" step="1" value="3">
       <input type="number" class="field__input field__input--number field__input--number-small" id="templateCountTurnInput" min="1" max="99" step="1" value="3">
-    </div>
-
-    <div class="template-toolbar__row">
-      <button type="button" class="template-toolbar__btn" id="templateBtnLv">[Lv.n]</button>
-      <input type="number" class="field__input field__input--number field__input--number-small" id="templateLvInput" min="1" max="99" step="1" value="10">
     </div>
 
     <div class="template-toolbar__row template-toolbar__row--grid">
@@ -636,6 +636,7 @@
               <select id="servantHpBonusMaxSelect" class="field__input">
                 <option value="1000">1000</option>
                 <option value="2000">2000</option>
+                <option value="3000">3000</option>
               </select>
             </label>
             <label class="field">
@@ -643,6 +644,7 @@
               <select id="servantAtkBonusMaxSelect" class="field__input">
                 <option value="1000">1000</option>
                 <option value="2000">2000</option>
+                <option value="3000">3000</option>
               </select>
             </label>
           </div>
