@@ -444,6 +444,8 @@
   const servantCommandCardSliderTrack = document.getElementById("servantCommandCardSliderTrack");
   const servantCommandCardCountLabel = document.getElementById("servantCommandCardCountLabel");
   const servantRaritySelect = document.getElementById("servantRaritySelect");
+  const servantHolyGrailToggle = document.getElementById("servantHolyGrailToggle");
+  const servantHolyGrailStageSelect = document.getElementById("servantHolyGrailStageSelect");
   const servantShowIllustratorVaToggle = document.getElementById("servantShowIllustratorVaToggle");
   const servantIllustratorNameInput = document.getElementById("servantIllustratorNameInput");
   const servantVoiceActorNameInput = document.getElementById("servantVoiceActorNameInput");
@@ -595,11 +597,16 @@
   // 左右矢印での切り替え先の表示に使う。
   const SERVANT_ASCENSION_LABELS = ["第一再臨", "第二再臨", "第三再臨", "最終再臨"];
 
+  // grailAssetKeyを持つ選択肢（黒/黒100）だけ、星1以上or聖杯表示中に
+  // 自動でそちらへ差し替わる（getServantSaintGraphFrameImage参照）。
+  // この差し替え専用画像自体は選択肢に含めない。
   const SERVANT_SAINT_GRAPH_FRAME_OPTIONS = [
     { id: "gold", label: "金", assetKey: "svSaintGraphFrameGold", classIconColor: "#fefecb", classIconColorBottom: "#f9e98e" },
     { id: "silver", label: "銀", assetKey: "svSaintGraphFrameSilver", classIconColor: "#fafbfc", classIconColorBottom: "#e2e6e9" },
     { id: "bronze", label: "銅", assetKey: "svSaintGraphFrameBronze", classIconColor: "#cc9d74", classIconColorBottom: "#8f6f53" },
-    { id: "black", label: "黒", assetKey: "svSaintGraphFrameBlack", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
+    { id: "black", label: "黒", assetKey: "svSaintGraphFrameBlack", grailAssetKey: "svSaintGraphFrameBlackGrail", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
+    { id: "gold100", label: "金100", assetKey: "svSaintGraphFrameGold100", classIconColor: "#fefecb", classIconColorBottom: "#f9e98e" },
+    { id: "black100", label: "黒100", assetKey: "svSaintGraphFrameBlack100", grailAssetKey: "svSaintGraphFrameBlack100Grail", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
   ];
 
   // ユーザーが独自にアップロードしたセイントグラフフレーム画像——組み込みの
@@ -632,6 +639,8 @@
     customClassIconFillEnabled: true, // アップロードしたクラスアイコンだけ、フレーム色での塗りつぶしをON/OFFできる
     saintGraphFrame: SERVANT_SAINT_GRAPH_FRAME_OPTIONS[0].id,
     rarity: 0, // レアリティ（星の数）——0は非表示、1〜5はsvRarityStarNを重ねる
+    holyGrailEnabled: false, // 聖杯——ONの間、レアリティに応じたsv_holy_grail_*を星より下層に重ねる
+    holyGrailStage: 1, // 聖杯の段階（0〜3）——聖杯本体よりさらに下層に敷くgrail_back_*の枚数・組み合わせを決める
     // 「各種設定」——画面全体の背景（ベース）。未アップロード時は既定の
     // sv_background.pngを使う。bgBaseHueはcontext.filterのhue-rotate(deg)
     // をそのまま使い、アップロード画像・既定画像のどちらにも効く。
@@ -800,6 +809,18 @@
     "skillIconPreset30",
     "skillIconPreset31",
     "skillIconPreset32",
+    "skillIconPreset33",
+    "skillIconPreset33a",
+    "skillIconPreset34",
+    "skillIconPreset34a",
+    "skillIconPreset35",
+    "skillIconPreset36",
+    "skillIconPreset36a",
+    "skillIconPreset37",
+    "skillIconPreset38",
+    "skillIconPreset39",
+    "skillIconPreset40",
+    "skillIconPreset41",
   ];
   // クラススキル専用（skill_class_番号）。
   const SERVANT_CLASS_SKILL_ICON_PRESET_KEYS_BASE = [
@@ -1252,12 +1273,37 @@
       "svSaintGraphFrameSilver",
       "svSaintGraphFrameBronze",
       "svSaintGraphFrameBlack",
+      "svSaintGraphFrameGold100",
+      "svSaintGraphFrameBlack100",
+      "svSaintGraphFrameBlackGrail",
+      "svSaintGraphFrameBlack100Grail",
       "svAtkHp",
+      "svHolyGrailGold",
+      "svHolyGrailSilver",
+      "svHolyGrailBronze",
+      "svHolyGrailBlack",
+      "svGrailBackGold1",
+      "svGrailBackGold2",
+      "svGrailBackGold3",
+      "svGrailBackSilver1",
+      "svGrailBackSilver2",
+      "svGrailBackSilver3",
+      "svGrailBackBronze1",
+      "svGrailBackBronze2",
+      "svGrailBackBronze3",
+      "svGrailBackBlack1",
+      "svGrailBackBlack2",
+      "svGrailBackBlack3",
       "svRarityStar1",
       "svRarityStar2",
       "svRarityStar3",
       "svRarityStar4",
       "svRarityStar5",
+      "svRarityStarGrail1",
+      "svRarityStarGrail2",
+      "svRarityStarGrail3",
+      "svRarityStarGrail4",
+      "svRarityStarGrail5",
       "svWindow",
       "svWindowName",
       "svButton",
@@ -1327,6 +1373,18 @@
       "skillIconPreset30",
       "skillIconPreset31",
       "skillIconPreset32",
+      "skillIconPreset33",
+      "skillIconPreset33a",
+      "skillIconPreset34",
+      "skillIconPreset34a",
+      "skillIconPreset35",
+      "skillIconPreset36",
+      "skillIconPreset36a",
+      "skillIconPreset37",
+      "skillIconPreset38",
+      "skillIconPreset39",
+      "skillIconPreset40",
+      "skillIconPreset41",
       "skillClassIconPreset1",
       "skillClassIconPreset2",
       "skillClassIconPreset3",
@@ -6350,6 +6408,18 @@
     renderAll();
   });
 
+  servantHolyGrailToggle.checked = servant.holyGrailEnabled;
+  servantHolyGrailToggle.addEventListener("change", (e) => {
+    servant.holyGrailEnabled = e.target.checked;
+    renderAll();
+  });
+
+  servantHolyGrailStageSelect.value = String(servant.holyGrailStage);
+  servantHolyGrailStageSelect.addEventListener("change", (e) => {
+    servant.holyGrailStage = Number(e.target.value);
+    renderAll();
+  });
+
   servantCustomClassNameInput.addEventListener("input", (e) => {
     servant.customClassName = e.target.value;
     renderAll();
@@ -7833,6 +7903,8 @@
           iconImg: c.iconImg ? imageToDataURL(c.iconImg) : null,
         })),
         rarity: servant.rarity,
+        holyGrailEnabled: servant.holyGrailEnabled,
+        holyGrailStage: servant.holyGrailStage,
         showIllustratorVa: servant.showIllustratorVa,
         illustratorName: servant.illustratorName,
         voiceActorName: servant.voiceActorName,
@@ -7967,6 +8039,10 @@
         : SERVANT_SAINT_GRAPH_FRAME_OPTIONS[0].id;
     servant.rarity = Number.isInteger(s.rarity) ? Math.min(5, Math.max(0, s.rarity)) : 0;
     servantRaritySelect.value = String(servant.rarity);
+    servant.holyGrailEnabled = !!s.holyGrailEnabled;
+    servantHolyGrailToggle.checked = servant.holyGrailEnabled;
+    servant.holyGrailStage = Number.isInteger(s.holyGrailStage) ? Math.min(3, Math.max(0, s.holyGrailStage)) : 1;
+    servantHolyGrailStageSelect.value = String(servant.holyGrailStage);
     servant.showIllustratorVa = s.showIllustratorVa ?? true;
     servantShowIllustratorVaToggle.checked = servant.showIllustratorVa;
     servant.illustratorName = s.illustratorName || "";
@@ -11106,7 +11182,9 @@
   }
   function getServantSaintGraphFrameImage() {
     const opt = getServantSaintGraphFrameOption();
-    return opt.img || assets[opt.assetKey] || null;
+    if (opt.img) return opt.img; // ユーザーがアップロードしたカスタムフレームは差し替え対象外
+    const useGrail = opt.grailAssetKey && (servant.rarity >= 1 || servant.holyGrailEnabled);
+    return assets[useGrail ? opt.grailAssetKey : opt.assetKey] || null;
   }
 
   // レアリティ（星の数）画像——0（非表示）の時はnull。1〜5はフレームと
@@ -11114,7 +11192,36 @@
   // 位置・サイズで重ねるだけで正しい位置に乗る（svAtkHpと同じ考え方）。
   function getServantRarityStarImage() {
     if (servant.rarity < 1) return null;
-    return assets["svRarityStar" + servant.rarity] || null;
+    const key = (servant.holyGrailEnabled ? "svRarityStarGrail" : "svRarityStar") + servant.rarity;
+    return assets[key] || null;
+  }
+
+  // 聖杯画像——星の数に応じて種類が自動で決まる（0:黒/1〜2:銅/3:銀/
+  // 4〜5:金）。フレーム・星と同じ座標系(885×1512)なのでframeRectと同じ
+  // 位置・サイズで重ねるだけで良い。
+  // レアリティに応じた聖杯の色系統——聖杯本体・背景(grail_back_*)の両方が
+  // このラベルでアセットキーを組み立てる共通の分岐。
+  const SERVANT_HOLY_GRAIL_COLOR_LABELS = { black: "Black", bronze: "Bronze", silver: "Silver", gold: "Gold" };
+  function getServantHolyGrailColorId() {
+    const r = servant.rarity;
+    return r >= 4 ? "gold" : r === 3 ? "silver" : r >= 1 ? "bronze" : "black";
+  }
+  function getServantHolyGrailImage() {
+    if (!servant.holyGrailEnabled) return null;
+    const label = SERVANT_HOLY_GRAIL_COLOR_LABELS[getServantHolyGrailColorId()];
+    return assets["svHolyGrail" + label] || null;
+  }
+
+  // 聖杯の背景(grail_back_*)——聖杯段階(0〜3)に応じて、聖杯本体のさらに
+  // 下層に重ねる枚数・組み合わせが変わる。段階3だけ特殊で、back_2の下に
+  // back_3をもう1枚重ねる（back_1は使わない）。戻り値は下から上への
+  // 描画順の配列。
+  const SERVANT_HOLY_GRAIL_STAGE_LAYERS = { 0: [], 1: [1], 2: [2], 3: [3, 2] };
+  function getServantHolyGrailBackgroundImages() {
+    if (!servant.holyGrailEnabled) return [];
+    const label = SERVANT_HOLY_GRAIL_COLOR_LABELS[getServantHolyGrailColorId()];
+    const layers = SERVANT_HOLY_GRAIL_STAGE_LAYERS[servant.holyGrailStage] || [];
+    return layers.map((n) => assets["svGrailBack" + label + n]).filter(Boolean);
   }
 
   // セイントグラフ画像が実際にクリップされる枠——フレーム画像自体の縦横比に
@@ -11671,6 +11778,16 @@
       // ことで、フレーム上の正しい位置にラベルが乗る。
       if (assets.svAtkHp) {
         context.drawImage(assets.svAtkHp, frameRect.x, frameRect.y, frameRect.w, frameRect.h);
+      }
+      // 聖杯——ONの間、レアリティに応じた種類の聖杯画像を星より下層に
+      // 重ねる（フレーム・ATK/HPラベルより手前、星より奥）。聖杯の背景
+      // (段階0〜3)は聖杯本体よりさらに奥に敷く。
+      getServantHolyGrailBackgroundImages().forEach((img) => {
+        context.drawImage(img, frameRect.x, frameRect.y, frameRect.w, frameRect.h);
+      });
+      const holyGrailImg = getServantHolyGrailImage();
+      if (holyGrailImg) {
+        context.drawImage(holyGrailImg, frameRect.x, frameRect.y, frameRect.w, frameRect.h);
       }
       // レアリティ（星0〜5個）——0の時は何も描かない。星の縁に細い黒い
       // 影を付けて背景から浮き上がって見えるようにする。

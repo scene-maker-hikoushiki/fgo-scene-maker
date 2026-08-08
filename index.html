@@ -489,6 +489,28 @@
           <select id="servantRaritySelect" class="field__input"><!-- JS populates --></select>
         </label>
 
+        <!-- 聖杯——ONの間、セイントグラフに聖杯画像を星より下層に重ねる。
+             画像の種類は星の数で自動的に決まる（0:黒/1〜2:銅/3:銀/4〜5:金）。 -->
+        <label class="switch-row" style="margin: 8px 0 0 0; padding: 6px 0;">
+          <span>聖杯を表示</span>
+          <span class="switch">
+            <input type="checkbox" id="servantHolyGrailToggle">
+            <span class="switch__track"></span>
+          </span>
+        </label>
+
+        <!-- 聖杯の段階（0〜3）——聖杯本体のさらに下層に敷くgrail_back_*の
+             組み合わせを切り替える。0は何も敷かない。 -->
+        <label class="field" style="margin-top:8px;">
+          <span class="field__label">聖杯の段階</span>
+          <select id="servantHolyGrailStageSelect" class="field__input">
+            <option value="0">段階0</option>
+            <option value="1">段階1</option>
+            <option value="2">段階2</option>
+            <option value="3">段階3</option>
+          </select>
+        </label>
+
         <div class="panel__divider"></div>
 
         <!-- セイントグラフ画像。フレームからはみ出せないようクリップし、
