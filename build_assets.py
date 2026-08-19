@@ -44,6 +44,8 @@ IMAGE_FILES = {
     "svSaintGraphFrameBlack": "sv_saint_graph_black.png",
     "svSaintGraphFrameGold100": "sv_saint_graph_gold_over100.png",
     "svSaintGraphFrameBlack100": "sv_saint_graph_black_over100.png",
+    "svSaintGraphFrameGrand": "sv_saint_graph_grand.png",
+    "svSaintGraphFrameGrandBlack": "sv_saint_graph_grand_black.png",
     # sv_saint_graph_black系だけの差し替え専用（星1以上/聖杯表示中に自動で
     # 使う）。セイントグラフ選択欄には出さないのでフレーム選択肢配列には
     # 登録しない。

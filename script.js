@@ -481,6 +481,9 @@
   const servantAtkBonusInput = document.getElementById("servantAtkBonusInput");
   const servantHpBonusMaxSelect = document.getElementById("servantHpBonusMaxSelect");
   const servantAtkBonusMaxSelect = document.getElementById("servantAtkBonusMaxSelect");
+  const servantGrandBonusToggle = document.getElementById("servantGrandBonusToggle");
+  const servantHpGrandBonusInput = document.getElementById("servantHpGrandBonusInput");
+  const servantAtkGrandBonusInput = document.getElementById("servantAtkGrandBonusInput");
   const servantNpLevelInput = document.getElementById("servantNpLevelInput");
   const servantNpMaxLevelInput = document.getElementById("servantNpMaxLevelInput");
   const servantSkillMaxLevelInput = document.getElementById("servantSkillMaxLevelInput");
@@ -607,6 +610,8 @@
     { id: "black", label: "黒", assetKey: "svSaintGraphFrameBlack", grailAssetKey: "svSaintGraphFrameBlackGrail", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
     { id: "gold100", label: "金100", assetKey: "svSaintGraphFrameGold100", classIconColor: "#fefecb", classIconColorBottom: "#f9e98e" },
     { id: "black100", label: "黒100", assetKey: "svSaintGraphFrameBlack100", grailAssetKey: "svSaintGraphFrameBlack100Grail", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
+    { id: "grand", label: "グランド", assetKey: "svSaintGraphFrameGrand", classIconColor: "#fefecb", classIconColorBottom: "#f9e98e" },
+    { id: "grand0", label: "グランド0", assetKey: "svSaintGraphFrameGrandBlack", classIconColor: "#ffffff", classIconColorBottom: "#eae6e6" },
   ];
 
   // ユーザーが独自にアップロードしたセイントグラフフレーム画像——組み込みの
@@ -676,6 +681,9 @@
     atk: 1000,
     atkBonus: 0,
     atkBonusMax: 1000,
+    grandBonusEnabled: false, // グランド強化——ONの間、強化の次の段に「グランド強化 n」をHP/ATKそれぞれ表示する（上限値は無し）
+    hpGrandBonus: 0,
+    atkGrandBonus: 0,
     cost: 12,
     npLevel: 0,
     npMaxLevel: 1,
@@ -1275,6 +1283,8 @@
       "svSaintGraphFrameBlack",
       "svSaintGraphFrameGold100",
       "svSaintGraphFrameBlack100",
+      "svSaintGraphFrameGrand",
+      "svSaintGraphFrameGrandBlack",
       "svSaintGraphFrameBlackGrail",
       "svSaintGraphFrameBlack100Grail",
       "svAtkHp",
@@ -7236,6 +7246,14 @@
     renderAll();
   });
 
+  servantGrandBonusToggle.checked = servantStatus.grandBonusEnabled;
+  servantGrandBonusToggle.addEventListener("change", (e) => {
+    servantStatus.grandBonusEnabled = e.target.checked;
+    renderAll();
+  });
+  wireServantNumberInput(servantHpGrandBonusInput, "hpGrandBonus", 0, 9999);
+  wireServantNumberInput(servantAtkGrandBonusInput, "atkGrandBonus", 0, 9999);
+
   // ---------------- フッタータブ（画像として保存 / プロジェクト / 動画保存） ----------------
   const footerTabs = [
     { btn: footerTabExportBtn, panel: footerPanelExport },
@@ -8138,6 +8156,9 @@
     servantStatus.atk = st.atk ?? servantStatus.atk;
     servantStatus.atkBonus = st.atkBonus ?? servantStatus.atkBonus;
     servantStatus.atkBonusMax = st.atkBonusMax ?? servantStatus.atkBonusMax;
+    servantStatus.grandBonusEnabled = st.grandBonusEnabled ?? servantStatus.grandBonusEnabled;
+    servantStatus.hpGrandBonus = st.hpGrandBonus ?? servantStatus.hpGrandBonus;
+    servantStatus.atkGrandBonus = st.atkGrandBonus ?? servantStatus.atkGrandBonus;
     servantStatus.cost = st.cost ?? servantStatus.cost;
     servantStatus.npLevel = st.npLevel ?? servantStatus.npLevel;
     servantStatus.npMaxLevel = st.npMaxLevel ?? servantStatus.npMaxLevel;
@@ -8160,6 +8181,9 @@
     servantAtkInput.value = servantStatus.atk;
     servantAtkBonusInput.value = servantStatus.atkBonus;
     servantAtkBonusMaxSelect.value = String(servantStatus.atkBonusMax);
+    servantGrandBonusToggle.checked = servantStatus.grandBonusEnabled;
+    servantHpGrandBonusInput.value = servantStatus.hpGrandBonus;
+    servantAtkGrandBonusInput.value = servantStatus.atkGrandBonus;
     servantCostInput.value = servantStatus.cost;
     servantNpLevelInput.value = servantStatus.npLevel;
     servantNpMaxLevelInput.value = servantStatus.npMaxLevel;
@@ -8432,8 +8456,13 @@
           };
         })
       );
+      // targetSkills[i]を新しいオブジェクトで置き換えると、コンソールの
+      // 入力欄が起動時にconst skill = skills[i]で捕まえた古いオブジェクト
+      // を指したままになり、読み込み後の編集がプレビューに反映されなく
+      // なる（wireServantSkillEntryInputs参照）。既存オブジェクトの中身
+      // だけ書き換えることで、参照を保ったまま値を更新する。
       loaded.forEach((entry, i) => {
-        targetSkills[i] = entry;
+        Object.assign(targetSkills[i], entry);
       });
     } catch (err) {
       console.error(err);
@@ -8484,8 +8513,11 @@
           };
         })
       );
+      // held skill側と同じ理由で、参照の置き換えではなくオブジェクトの
+      // 中身だけ書き換える（コンソール入力欄のイベントリスナーが起動時に
+      // 捕まえた古い参照を指したままになるのを防ぐ）。
       loaded.forEach((entry, i) => {
-        servantAppendSkills[i] = entry;
+        Object.assign(servantAppendSkills[i], entry);
       });
     } catch (err) {
       console.error(err);
@@ -9750,6 +9782,7 @@
   const SERVANT_STATUS_SECTION_GAP = 20;
   const SERVANT_STATUS_SECTION_H = 140;
   const SERVANT_STATUS_WINDOW_H = 460; // 「ステータス」だけ中身が多いので他より高くする
+  const SERVANT_STATUS_GRAND_BONUS_ROW_H = 40; // グランド強化ON時、強化の下にもう1行増える分だけウインドウを高くする
 
   // ステータスウインドウ内の余白・見出し高さ・顔画像の正方形サイズ——
   // 描画側とヒットテスト側の両方から参照する共通の基準値。
@@ -10234,7 +10267,7 @@
   }
 
   function servantStatusSectionHeight(label) {
-    if (label === "ステータス") return SERVANT_STATUS_WINDOW_H;
+    if (label === "ステータス") return SERVANT_STATUS_WINDOW_H + (servantStatus.grandBonusEnabled ? SERVANT_STATUS_GRAND_BONUS_ROW_H : 0);
     if (label === "保有スキル") return getServantSkillsWindowDynamicHeight("held");
     if (label === "クラススキル") return getServantSkillsWindowDynamicHeight("class");
     if (label === "アペンドスキル") return getServantSkillsWindowDynamicHeight("append");
@@ -12280,10 +12313,32 @@
       drawBonusLine(servantStatus.hpBonus, servantStatus.hpBonusMax, colX);
       drawBonusLine(servantStatus.atkBonus, servantStatus.atkBonusMax, colX + colW * 0.42);
 
+      // グランド強化——ONの間だけ、強化の次の行にHP/ATKそれぞれ表示する
+      // （通常の強化と違い上限値は持たない）。OFFの間は行自体を描かず、
+      // 下の宝具・スキル以降の位置も詰めたまま（servantStatusSectionHeight
+      // 側もこのONOFFに連動してウインドウの高さを増減させている）。
+      let afterBonusY = bonusY;
+      if (servantStatus.grandBonusEnabled) {
+        const grandBonusY = bonusY + SERVANT_STATUS_GRAND_BONUS_ROW_H;
+        const drawGrandBonusLine = (value, colStartX) => {
+          context.font = statLabelFontBold;
+          context.fillStyle = SERVANT_YELLOW_LABEL_COLOR;
+          const label = "グランド強化";
+          fillTextOutlined(context, label, colStartX, grandBonusY, 3);
+          const labelW = context.measureText(label).width;
+          context.font = secondaryValueFont;
+          context.fillStyle = "#ffffff";
+          fillTextOutlined(context, " " + value.toLocaleString(), colStartX + labelW, grandBonusY, 3);
+        };
+        drawGrandBonusLine(servantStatus.hpGrandBonus, colX);
+        drawGrandBonusLine(servantStatus.atkGrandBonus, colX + colW * 0.42);
+        afterBonusY = grandBonusY;
+      }
+
       // 宝具・スキル強化段階——最大強化段階の数だけアイコンを並べ、そのうち
       // 強化段階の数値分だけ_active画像を使う（最大強化段階自体は0〜4、
       // 強化段階は最大強化段階を超えられない——console側でクランプ済み）。
-      const npSkillY = bonusY + 44;
+      const npSkillY = afterBonusY + 44;
       context.font = statLabelFontBold;
       context.fillStyle = SERVANT_YELLOW_LABEL_COLOR;
       fillTextOutlined(context, "宝具", colX, npSkillY, 3);
